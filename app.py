@@ -141,6 +141,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_image():
+    """Upload a single image for face detection and clustering"""
     try:
         # Check if file is present
         if 'file' not in request.files:
@@ -154,132 +155,198 @@ def upload_image():
         
         # Check if file is allowed
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            
-            # Load image and detect faces
-            image_data = face_recognition.load_image_file(file_path)
-            face_locations = face_recognition.face_locations(image_data)
-            face_encodings = face_recognition.face_encodings(image_data, face_locations)
-            
-            # Save image document
-            image_doc = {
-                "file_path": file_path,
-                "filename": filename,
-                "faces": [],
-                "persons": []
-            }
-            image_result = images_col.insert_one(image_doc)
-            image_id = image_result.inserted_id
-            
-            # Save faces with cropped images and intelligent person assignment
-            face_ids = []
-            assigned_persons = set()
-            
-            # Get all existing face encodings for comparison
-            existing_faces = list(faces_col.find({}, {"embedding": 1, "person_id": 1}))
-            known_encodings = []
-            known_person_ids = []
-            
-            for face in existing_faces:
-                if face.get("embedding") and face.get("person_id"):
-                    known_encodings.append(np.array(face["embedding"]))
-                    known_person_ids.append(face["person_id"])
-            
-            print(f"Found {len(known_encodings)} existing faces for comparison")
-            
-            for i, (encoding, location) in enumerate(zip(face_encodings, face_locations)):
-                person_id = None
-                
-                # First check against existing faces using face_recognition library
-                if known_encodings:
-                    matches = face_recognition.compare_faces(
-                        known_encodings, 
-                        encoding, 
-                        tolerance=app_config.FACE_RECOGNITION_TOLERANCE
-                    )
-                    
-                    if any(matches):
-                        # Found a match - get the person_id of the first match
-                        match_index = matches.index(True)
-                        person_id = known_person_ids[match_index]
-                        print(f"Face {i} matched to existing person: {person_id}")
-                
-                # If no match found, create new person
-                if person_id is None:
-                    person_count = persons_col.count_documents({}) + 1
-                    person_doc = {
-                        "name": f"Person {person_count}",
-                        "faces": [],
-                        "images": []
-                    }
-                    person_result = persons_col.insert_one(person_doc)
-                    person_id = person_result.inserted_id
-                    print(f"Face {i} assigned to new person: {person_id}")
-                
-                # Crop and save the face
-                face_path, face_filename = crop_and_save_face(image_data, location, i, filename)
-                
-                face_doc = {
-                    "embedding": encoding.tolist(),
-                    "person_id": person_id,  # Now assigned immediately
-                    "image_id": image_id,
-                    "face_location": {
-                        "top": int(location[0]),
-                        "right": int(location[1]),
-                        "bottom": int(location[2]),
-                        "left": int(location[3])
-                    },
-                    "cropped_face_path": face_path,
-                    "cropped_face_filename": face_filename
-                }
-                face_result = faces_col.insert_one(face_doc)
-                face_ids.append(face_result.inserted_id)
-                assigned_persons.add(person_id)
-                
-                # Update person document with this face and image
-                persons_col.update_one(
-                    {"_id": person_id},
-                    {
-                        "$addToSet": {
-                            "faces": face_result.inserted_id,
-                            "images": image_id
-                        }
-                    }
-                )
-                
-                # Add the new encoding to known_encodings for comparing within this batch
-                known_encodings.append(encoding)
-                known_person_ids.append(person_id)
-            
-            # Update image with face IDs and assigned persons
-            images_col.update_one(
-                {"_id": image_id},
-                {"$set": {
-                    "faces": face_ids,
-                    "persons": list(assigned_persons)
-                }}
-            )
-            
-            return jsonify({
-                "message": "File uploaded successfully",
-                "file_path": file_path,
-                "filename": filename,
-                "faces_detected": len(face_encodings),
-                "persons_assigned": len(assigned_persons),
-                "image_id": str(image_id),
-                "face_assignments": [
-                    {"face_id": str(face_ids[i]), "person_id": str(list(assigned_persons)[i] if i < len(assigned_persons) else None)} 
-                    for i in range(len(face_ids))
-                ],
-                "note": "Faces assigned using intelligent matching. Use /cluster endpoint to re-cluster if needed."
-            })
+            return process_single_image(file)
         
         return jsonify({"error": "Invalid file type"}), 400
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/upload-multiple', methods=['POST'])
+def upload_multiple_images():
+    """Upload multiple images for face detection and clustering"""
+    try:
+        # Check if files are present
+        if 'files' not in request.files:
+            return jsonify({"error": "No files part"}), 400
+        
+        files = request.files.getlist('files')
+        
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({"error": "No files selected"}), 400
+        
+        results = []
+        total_faces = 0
+        successful_uploads = 0
+        errors = []
+        
+        for file in files:
+            if file and file.filename != '' and allowed_file(file.filename):
+                try:
+                    result = process_single_image(file)
+                    if isinstance(result, tuple):  # Error response
+                        errors.append(f"{file.filename}: {result[0]['error']}")
+                    else:
+                        # result is already a dictionary, not a Response object
+                        results.append({
+                            "filename": file.filename,
+                            "faces_detected": result.get("faces_detected", 0),
+                            "persons_assigned": result.get("persons_assigned", 0),
+                            "image_id": result.get("image_id")
+                        })
+                        total_faces += result.get("faces_detected", 0)
+                        successful_uploads += 1
+                except Exception as e:
+                    errors.append(f"{file.filename}: {str(e)}")
+            else:
+                errors.append(f"{file.filename}: Invalid file type")
+        
+        return jsonify({
+            "message": f"Multiple upload completed",
+            "successful_uploads": successful_uploads,
+            "total_files": len(files),
+            "total_faces_detected": total_faces,
+            "results": results,
+            "errors": errors if errors else None
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def process_single_image(file):
+    """Helper function to process a single image"""
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    
+    # Load image and detect faces
+    image_data = face_recognition.load_image_file(file_path)
+    face_locations = face_recognition.face_locations(image_data)
+    face_encodings = face_recognition.face_encodings(image_data, face_locations)
+    
+    # Save image document
+    image_doc = {
+        "file_path": file_path,
+        "filename": filename,
+        "faces": [],
+        "persons": []
+    }
+    image_result = images_col.insert_one(image_doc)
+    image_id = image_result.inserted_id
+    
+    # Save faces with cropped images and intelligent person assignment
+    face_ids = []
+    assigned_persons = set()
+    face_person_assignments = []  # Keep track of face-person assignments in order
+    
+    # Get all existing face encodings for comparison
+    existing_faces = list(faces_col.find({}, {"embedding": 1, "person_id": 1}))
+    known_encodings = []
+    known_person_ids = []
+    
+    for face in existing_faces:
+        if face.get("embedding") and face.get("person_id"):
+            known_encodings.append(np.array(face["embedding"]))
+            known_person_ids.append(face["person_id"])
+    
+    print(f"Found {len(known_encodings)} existing faces for comparison")
+    
+    for i, (encoding, location) in enumerate(zip(face_encodings, face_locations)):
+        person_id = None
+        
+        # First check against existing faces using face_recognition library
+        if known_encodings:
+            matches = face_recognition.compare_faces(
+                known_encodings, 
+                encoding, 
+                tolerance=app_config.FACE_RECOGNITION_TOLERANCE
+            )
+            
+            if any(matches):
+                # Found a match - get the person_id of the first match
+                match_index = matches.index(True)
+                person_id = known_person_ids[match_index]
+                print(f"Face {i} matched to existing person: {person_id}")
+        
+        # If no match found, create new person
+        if person_id is None:
+            person_count = persons_col.count_documents({}) + 1
+            person_doc = {
+                "name": f"Person {person_count}",
+                "faces": [],
+                "images": []
+            }
+            person_result = persons_col.insert_one(person_doc)
+            person_id = person_result.inserted_id
+            print(f"Face {i} assigned to new person: {person_id}")
+        
+        # Crop and save the face
+        face_path, face_filename = crop_and_save_face(image_data, location, i, filename)
+        
+        face_doc = {
+            "embedding": encoding.tolist(),
+            "person_id": person_id,  # Now assigned immediately
+            "image_id": image_id,
+            "face_location": {
+                "top": int(location[0]),
+                "right": int(location[1]),
+                "bottom": int(location[2]),
+                "left": int(location[3])
+            },
+            "cropped_face_path": face_path,
+            "cropped_face_filename": face_filename
+        }
+        face_result = faces_col.insert_one(face_doc)
+        face_ids.append(face_result.inserted_id)
+        assigned_persons.add(person_id)
+        face_person_assignments.append({"face_id": str(face_result.inserted_id), "person_id": str(person_id)})
+        
+        # Update person document with this face and image
+        persons_col.update_one(
+            {"_id": person_id},
+            {
+                "$addToSet": {
+                    "faces": face_result.inserted_id,
+                    "images": image_id
+                }
+            }
+        )
+        
+        # Add the new encoding to known_encodings for comparing within this batch
+        known_encodings.append(encoding)
+        known_person_ids.append(person_id)
+    
+    # Update image with face IDs and assigned persons
+    images_col.update_one(
+        {"_id": image_id},
+        {"$set": {
+            "faces": face_ids,
+            "persons": list(assigned_persons)
+        }}
+    )
+    
+    # Handle response for both cases (with and without faces)
+    if len(face_encodings) > 0:
+        return {
+            "message": "File uploaded successfully",
+            "file_path": file_path,
+            "filename": filename,
+            "faces_detected": len(face_encodings),
+            "persons_assigned": len(assigned_persons),
+            "image_id": str(image_id),
+            "face_assignments": face_person_assignments,
+            "note": "Faces detected and assigned using intelligent matching. Use /cluster endpoint to re-cluster if needed."
+        }
+    else:
+        return {
+            "message": "File uploaded successfully (no faces detected)",
+            "file_path": file_path,
+            "filename": filename,
+            "faces_detected": 0,
+            "persons_assigned": 0,
+            "image_id": str(image_id),
+            "note": "Image saved but no faces detected. This is normal for landscape photos, objects, etc."
+        }
 
 @app.route('/cluster-preview', methods=['POST'])
 def preview_clustering():
@@ -522,41 +589,6 @@ def cluster_faces():
         print(f"Clustering error: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/gallery', methods=['GET'])
-def get_gallery():
-    try:
-        persons = list(persons_col.find())
-        gallery = []
-        
-        for person in persons:
-            person_faces = []
-            
-            for face_id in person.get("faces", []):
-                face = faces_col.find_one({"_id": face_id})
-                if face:
-                    image = images_col.find_one({"_id": face["image_id"]})
-                    if image:
-                        person_faces.append({
-                            "face_id": str(face["_id"]),
-                            "image_path": image["file_path"],
-                            "filename": image.get("filename", "")
-                        })
-            
-            gallery.append({
-                "person_id": str(person["_id"]),
-                "person_name": person["name"],
-                "faces": person_faces,
-                "total_faces": len(person_faces)
-            })
-        
-        return jsonify({
-            "gallery": gallery,
-            "total_persons": len(gallery)
-        })
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/images/<filename>')
 def uploaded_file(filename):
     """Serve uploaded images"""
@@ -566,6 +598,49 @@ def uploaded_file(filename):
 def serve_cropped_face(filename):
     """Serve cropped face images"""
     return send_from_directory(app.config['FACES_FOLDER'], filename)
+
+@app.route('/all-images', methods=['GET'])
+def get_all_images():
+    """Get all uploaded images (with and without faces)"""
+    try:
+        images = list(images_col.find())
+        
+        all_images = []
+        for image in images:
+            # Get faces in this image (if any)
+            image_faces = list(faces_col.find({"image_id": image["_id"]}))
+            
+            # Get persons in this image (if any)
+            person_ids = image.get("persons", [])
+            persons_in_image = []
+            if person_ids:
+                persons = list(persons_col.find({"_id": {"$in": person_ids}}))
+                persons_in_image = [{"person_id": str(p["_id"]), "person_name": p.get("name", "Unknown")} for p in persons]
+            
+            image_data = {
+                "image_id": str(image["_id"]),
+                "filename": image.get("filename", ""),
+                "file_path": image.get("file_path", ""),
+                "faces_count": len(image_faces),
+                "persons_count": len(persons_in_image),
+                "persons": persons_in_image,
+                "has_faces": len(image_faces) > 0,
+                "upload_date": image.get("created_at", "Unknown")
+            }
+            all_images.append(image_data)
+        
+        # Sort by upload date (newest first)
+        all_images.sort(key=lambda x: x.get("upload_date", ""), reverse=True)
+        
+        return jsonify({
+            "images": all_images,
+            "total_images": len(all_images),
+            "images_with_faces": len([img for img in all_images if img["has_faces"]]),
+            "images_without_faces": len([img for img in all_images if not img["has_faces"]])
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/person/<person_id>')
 def get_person_details(person_id):
@@ -722,10 +797,23 @@ def get_stats():
         total_images = images_col.count_documents({})
         total_faces = faces_col.count_documents({})
         
+        # Get additional statistics
+        images_with_faces = images_col.count_documents({"faces": {"$ne": []}})
+        images_without_faces = total_images - images_with_faces
+        manual_assignments = faces_col.count_documents({"is_manual_assignment": True})
+        
         return jsonify({
             "total_persons": total_persons,
             "total_images": total_images,
-            "total_faces": total_faces
+            "total_faces": total_faces,
+            "images_with_faces": images_with_faces,
+            "images_without_faces": images_without_faces,
+            "manual_face_assignments": manual_assignments,
+            "gallery_stats": {
+                "face_coverage": round((images_with_faces / total_images * 100) if total_images > 0 else 0, 1),
+                "avg_faces_per_image": round((total_faces / images_with_faces) if images_with_faces > 0 else 0, 1),
+                "avg_faces_per_person": round((total_faces / total_persons) if total_persons > 0 else 0, 1)
+            }
         })
         
     except Exception as e:
@@ -981,12 +1069,170 @@ def move_face_to_new_person(face_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/persons/list', methods=['GET'])
-def list_all_persons():
-    """Get a simple list of all persons for face moving dropdown"""
+@app.route('/search-by-image', methods=['POST'])
+def search_by_image():
+    """Search for similar faces using an uploaded image"""
     try:
-        persons = persons_col.find({}, {"name": 1}).sort("name", 1)
-        person_list = [{"id": str(person["_id"]), "name": person["name"]} for person in persons]
+        # Check if file is present
+        if 'file' not in request.files:
+            return jsonify({"error": "No file part"}), 400
+        
+        file = request.files['file']
+        
+        # Check if file is selected
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+        
+        # Check if file is allowed
+        if not (file and allowed_file(file.filename)):
+            return jsonify({"error": "Invalid file type"}), 400
+        
+        # Save temporary file
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+            file.save(temp_file.name)
+            temp_path = temp_file.name
+        
+        try:
+            # Load image and detect faces
+            image_data = face_recognition.load_image_file(temp_path)
+            face_locations = face_recognition.face_locations(image_data)
+            face_encodings = face_recognition.face_encodings(image_data, face_locations)
+            
+            # Check face count
+            if len(face_encodings) == 0:
+                return jsonify({
+                    "error": "No faces detected in the uploaded image",
+                    "message": "Please upload an image with at least one visible face"
+                }), 400
+            
+            if len(face_encodings) > 1:
+                return jsonify({
+                    "error": "Multiple faces detected in the uploaded image",
+                    "message": "Please upload an image with exactly one face for search",
+                    "faces_detected": len(face_encodings)
+                }), 400
+            
+            # Get the single face encoding
+            search_encoding = face_encodings[0]
+            
+            # Get all faces from database
+            all_faces = list(faces_col.find({}, {
+                "embedding": 1, 
+                "person_id": 1, 
+                "image_id": 1, 
+                "cropped_face_filename": 1,
+                "_id": 1
+            }))
+            
+            if not all_faces:
+                return jsonify({
+                    "message": "No faces in database to search against",
+                    "matches": []
+                })
+            
+            # Compare against all faces
+            known_encodings = []
+            face_data = []
+            
+            for face in all_faces:
+                if face.get("embedding"):
+                    known_encodings.append(np.array(face["embedding"]))
+                    face_data.append(face)
+            
+            # Find matches with configurable tolerance
+            search_tolerance = float(request.form.get('tolerance', app_config.FACE_RECOGNITION_TOLERANCE))
+            matches = face_recognition.compare_faces(
+                known_encodings, 
+                search_encoding, 
+                tolerance=search_tolerance
+            )
+            
+            # Get distances for ranking
+            distances = face_recognition.face_distance(known_encodings, search_encoding)
+            
+            # Collect matches with their confidence scores
+            match_results = []
+            for i, (is_match, distance) in enumerate(zip(matches, distances)):
+                if is_match:
+                    face = face_data[i]
+                    
+                    # Get person information
+                    person = persons_col.find_one({"_id": face["person_id"]}) if face.get("person_id") else None
+                    
+                    # Get image information
+                    image = images_col.find_one({"_id": face["image_id"]}) if face.get("image_id") else None
+                    
+                    confidence = max(0, 1 - (distance / search_tolerance))
+                    
+                    match_result = {
+                        "face_id": str(face["_id"]),
+                        "confidence": round(confidence * 100, 1),  # Percentage
+                        "distance": round(float(distance), 4),
+                        "person": {
+                            "person_id": str(person["_id"]) if person else None,
+                            "person_name": person.get("name", "Unknown") if person else "Unknown"
+                        } if person else None,
+                        "image": {
+                            "image_id": str(image["_id"]) if image else None,
+                            "filename": image.get("filename", "") if image else ""
+                        } if image else None,
+                        "cropped_face_filename": face.get("cropped_face_filename")
+                    }
+                    match_results.append(match_result)
+            
+            # Sort by confidence (highest first)
+            match_results.sort(key=lambda x: x["confidence"], reverse=True)
+            
+            # Limit results
+            max_results = int(request.form.get('max_results', 20))
+            match_results = match_results[:max_results]
+            
+            return jsonify({
+                "message": f"Found {len(match_results)} matching faces",
+                "search_params": {
+                    "tolerance": search_tolerance,
+                    "max_results": max_results
+                },
+                "matches": match_results,
+                "total_faces_searched": len(known_encodings)
+            })
+            
+        finally:
+            # Clean up temporary file
+            import os
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/all-persons', methods=['GET'])
+def get_all_persons():
+    """Get all persons with their first cropped face as thumbnail"""
+    try:
+        persons = list(persons_col.find())
+        person_list = []
+        
+        for person in persons:
+            # Get the first face for this person as thumbnail
+            first_face = faces_col.find_one({"person_id": person["_id"]})
+            thumbnail_filename = None
+            
+            if first_face and first_face.get("cropped_face_filename"):
+                thumbnail_filename = first_face["cropped_face_filename"]
+            
+            person_data = {
+                "person_id": str(person["_id"]),
+                "person_name": person.get("name", "Unknown"),
+                "total_faces": len(person.get("faces", [])),
+                "total_images": len(person.get("images", [])),
+                "thumbnail": thumbnail_filename  # cropped face filename
+            }
+            person_list.append(person_data)
+        
+        # Sort by person name
+        person_list.sort(key=lambda x: x["person_name"])
         
         return jsonify({
             "persons": person_list,
