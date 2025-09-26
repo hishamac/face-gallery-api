@@ -121,81 +121,6 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-# Configure Nginx
-echo "🌐 Configuring Nginx..."
-sudo tee /etc/nginx/sites-available/face-api > /dev/null << EOF
-server {
-    listen 80;
-    server_name _;
-    
-    # Increase client max body size for image uploads
-    client_max_body_size 50M;
-    
-    # Security headers
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    
-    # API endpoints
-    location / {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # Increase timeout for face processing
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        
-        # CORS headers (customize as needed)
-        add_header 'Access-Control-Allow-Origin' '*' always;
-        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
-        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
-        
-        # Handle preflight requests
-        if (\$request_method = 'OPTIONS') {
-            add_header 'Access-Control-Max-Age' 1728000;
-            add_header 'Content-Type' 'text/plain; charset=utf-8';
-            add_header 'Content-Length' 0;
-            return 204;
-        }
-    }
-    
-    # Serve uploaded images directly
-    location /uploads/ {
-        alias /opt/face-api/uploads/;
-        expires 1d;
-        add_header Cache-Control "public, immutable";
-        add_header 'Access-Control-Allow-Origin' '*' always;
-    }
-    
-    # Serve face images directly
-    location /faces/ {
-        alias /opt/face-api/faces/;
-        expires 1d;
-        add_header Cache-Control "public, immutable";
-        add_header 'Access-Control-Allow-Origin' '*' always;
-    }
-    
-    # Health check endpoint
-    location /health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
-    }
-}
-EOF
-
-# Enable Nginx site
-sudo ln -sf /etc/nginx/sites-available/face-api /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-
-# Test Nginx configuration
-sudo nginx -t
-
 # Create self-signed SSL certificate for HTTPS
 echo "🔐 Creating self-signed SSL certificate..."
 sudo mkdir -p /etc/nginx/ssl
@@ -208,8 +133,8 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 sudo chmod 600 /etc/nginx/ssl/face-api.key
 sudo chmod 644 /etc/nginx/ssl/face-api.crt
 
-# Update Nginx configuration to support HTTPS
-echo "🌐 Updating Nginx configuration for HTTPS..."
+# Configure Nginx
+echo "🌐 Configuring Nginx..."
 sudo tee /etc/nginx/sites-available/face-api > /dev/null << EOF
 # HTTP server - redirect to HTTPS
 server {
@@ -254,19 +179,7 @@ server {
         proxy_send_timeout 300s;
         proxy_read_timeout 300s;
         
-        # CORS headers (customize as needed)
-        add_header 'Access-Control-Allow-Origin' '*' always;
-        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
-        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
-        
-        # Handle preflight requests
-        if (\$request_method = 'OPTIONS') {
-            add_header 'Access-Control-Max-Age' 1728000;
-            add_header 'Content-Type' 'text/plain; charset=utf-8';
-            add_header 'Content-Length' 0;
-            return 204;
-        }
+        # Flask handles CORS headers
     }
     
     # Serve uploaded images directly
@@ -274,7 +187,6 @@ server {
         alias /opt/face-api/uploads/;
         expires 1d;
         add_header Cache-Control "public, immutable";
-        add_header 'Access-Control-Allow-Origin' '*' always;
     }
     
     # Serve face images directly
@@ -282,7 +194,6 @@ server {
         alias /opt/face-api/faces/;
         expires 1d;
         add_header Cache-Control "public, immutable";
-        add_header 'Access-Control-Allow-Origin' '*' always;
     }
     
     # Health check endpoint
@@ -293,6 +204,13 @@ server {
     }
 }
 EOF
+
+# Enable Nginx site
+sudo ln -sf /etc/nginx/sites-available/face-api /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Test Nginx configuration
+sudo nginx -t
 
 # Create log rotation
 sudo tee /etc/logrotate.d/face-api > /dev/null << EOF
@@ -383,6 +301,14 @@ echo "4. Directories:"
 echo "5. Services:"
 sudo systemctl is-enabled nginx >/dev/null && echo "   ✅ Nginx enabled" || echo "   ❌ Nginx not enabled"
 sudo systemctl is-active nginx >/dev/null && echo "   ✅ Nginx running" || echo "   ❌ Nginx not running"
+
+# Check CORS configuration
+echo "6. CORS Configuration:"
+if grep -q "Access-Control-Allow" /etc/nginx/sites-available/face-api; then
+    echo "   ⚠️  Warning: Nginx still has CORS headers - may cause duplication"
+else
+    echo "   ✅ Nginx configuration clean - Flask handles CORS"
+fi
 
 echo
 echo "Setup validation completed!"
@@ -496,6 +422,11 @@ echo
 echo "🎉 Face Recognition API VM Setup Complete!"
 echo "=========================================="
 echo
+echo "✅ Setup Features:"
+echo "   - HTTPS enabled with self-signed certificate"
+echo "   - Flask handles CORS headers for proper client access"
+echo "   - Automated service management and monitoring tools"
+echo
 echo "⚠️  IMPORTANT: Complete these steps manually:"
 echo
 echo "1. Create your environment file:"
@@ -507,7 +438,7 @@ echo "2. Start the API service:"
 echo "   sudo systemctl enable face-api"
 echo "   sudo systemctl start face-api"
 echo
-echo "3. Validate setup:"
+echo "3. Validate setup (includes configuration check):"
 echo "   face-validate"
 echo
 echo "4. Check service status:"
@@ -518,7 +449,7 @@ echo "   # HTTP (will redirect to HTTPS):"
 echo "   curl http://localhost/"
 echo "   # HTTPS (self-signed certificate):"
 echo "   curl -k https://localhost/"
-echo "   curl -k https://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google')/"
+echo "   curl -k https://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google' 2>/dev/null)/"
 echo
 echo "📋 Useful commands:"
 echo "   face-status    - Check API status"
@@ -526,7 +457,7 @@ echo "   face-logs      - View live logs"
 echo "   face-restart   - Restart API"
 echo "   face-update    - Update from GitHub"
 echo "   face-monitor   - System monitoring"
-echo "   face-validate  - Validate setup"
+echo "   face-validate  - Validate setup (includes configuration check)"
 echo "   https-info     - Get HTTPS access URLs"
 echo "   setup-ssl      - Setup Let's Encrypt (requires domain)"
 echo
