@@ -15,9 +15,7 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
     DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
     
-    # Upload Configuration
-    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
-    FACES_FOLDER = os.getenv('FACES_FOLDER', 'faces')
+    # File Upload Configuration  
     MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))  # 16MB
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
     

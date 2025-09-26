@@ -60,17 +60,6 @@ db = client[app_config.DATABASE_NAME]
 # Store database reference in app context
 app.db = db
 
-# Ensure upload folder exists
-UPLOAD_FOLDER = app_config.UPLOAD_FOLDER
-FACES_FOLDER = app_config.FACES_FOLDER
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-if not os.path.exists(FACES_FOLDER):
-    os.makedirs(FACES_FOLDER)
-
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['FACES_FOLDER'] = FACES_FOLDER
-
 # Allowed file extensions
 ALLOWED_EXTENSIONS = app_config.ALLOWED_EXTENSIONS
 
@@ -94,7 +83,7 @@ app.register_blueprint(stats_bp, url_prefix='/stats')
 def index():
     return jsonify({
         "message": "Face Clustering API",
-        "version": "2.0",
+        "version": "3.0",
         "endpoints": {
             "images": "/images",
             "albums": "/albums", 

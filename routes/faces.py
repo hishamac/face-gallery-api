@@ -23,11 +23,35 @@ def serialize_doc(doc):
         return result
     return doc
 
-@faces_bp.route('/<filename>')
-def serve_cropped_face(filename):
-    """Serve cropped face images"""
-    from flask import current_app
-    return send_from_directory(current_app.config['FACES_FOLDER'], filename)
+@faces_bp.route('/<face_id>')
+def serve_cropped_face(face_id):
+    """Serve cropped face images from base64 data"""
+    from flask import current_app, Response
+    import base64
+    
+    try:
+        db = current_app.db
+        faces_col = db.faces
+        
+        # Find face by ID
+        face = faces_col.find_one({"_id": ObjectId(face_id)})
+        if not face:
+            return jsonify({"error": "Face not found"}), 404
+        
+        # Get base64 data
+        base64_data = face.get("cropped_face_base64")
+        
+        if not base64_data:
+            return jsonify({"error": "Face image data not found"}), 404
+        
+        # Decode base64 data
+        image_data = base64.b64decode(base64_data)
+        
+        # Return image response (faces are saved as JPEG)
+        return Response(image_data, mimetype="image/jpeg")
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @faces_bp.route('/<face_id>/move', methods=['PUT'])
 def move_face_to_person(face_id):

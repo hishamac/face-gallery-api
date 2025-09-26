@@ -29,8 +29,10 @@ def serialize_doc(doc):
     return doc
 
 def crop_and_save_face(image_array, face_location, face_index, image_filename):
-    """Crop face from image and save it as a separate file"""
+    """Crop face from image and return base64 encoded data"""
     from flask import current_app
+    import base64
+    import io
     try:
         from PIL import Image as PILImage
         
@@ -55,24 +57,29 @@ def crop_and_save_face(image_array, face_location, face_index, image_filename):
         # Crop the face
         face_image = pil_image.crop((crop_left, crop_top, crop_right, crop_bottom))
         
-        # Generate face filename
+        # Convert cropped face to base64
+        buffer = io.BytesIO()
+        face_image.save(buffer, format='JPEG', quality=90)
+        img_bytes = buffer.getvalue()
+        base64_string = base64.b64encode(img_bytes).decode('utf-8')
+        
+        # Generate face filename for reference (not used for file system)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         face_filename = f"{os.path.splitext(image_filename)[0]}_face_{face_index}_{timestamp}.jpg"
-        face_path = os.path.join(current_app.config['FACES_FOLDER'], face_filename)
         
-        # Save cropped face
-        face_image.save(face_path, 'JPEG', quality=90)
-        
-        return face_path, face_filename
+        return base64_string, face_filename
     except Exception as e:
         print(f"Error cropping face: {e}")
         return None, None
 
 def process_single_image(file, album_id=None, section_id=None):
-    """Helper function to process a single image"""
+    """Helper function to process a single image with optimized memory usage"""
     from flask import current_app
     from config import config
     import os
+    import base64
+    import io
+    from PIL import Image as PILImage
     
     # Get configuration
     env = os.getenv('FLASK_ENV', 'development')
@@ -85,18 +92,67 @@ def process_single_image(file, album_id=None, section_id=None):
     persons_col = db.persons
     
     filename = secure_filename(file.filename)
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-    file.save(file_path)
     
-    # Load image and detect faces
-    image_data = face_recognition.load_image_file(file_path)
+    # Read file data
+    file_data = file.read()
+    
+    # Check file size (max 10MB)
+    max_size = 10 * 1024 * 1024  # 10MB
+    if len(file_data) > max_size:
+        return {"error": f"File too large. Maximum size is {max_size // (1024*1024)}MB"}, 413
+    
+    # Load image for compression and processing
+    temp_file = io.BytesIO(file_data)
+    pil_image = PILImage.open(temp_file)
+    
+    # Convert to RGB if necessary (for face_recognition compatibility)
+    if pil_image.mode != 'RGB':
+        pil_image = pil_image.convert('RGB')
+    
+    # Compress large images for faster processing while maintaining quality
+    max_dimension = 1920  # Max width or height
+    original_width, original_height = pil_image.size
+    
+    if original_width > max_dimension or original_height > max_dimension:
+        # Calculate scaling ratio
+        if original_width > original_height:
+            scale_ratio = max_dimension / original_width
+        else:
+            scale_ratio = max_dimension / original_height
+        
+        new_width = int(original_width * scale_ratio)
+        new_height = int(original_height * scale_ratio)
+        
+        # Resize image
+        pil_image = pil_image.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+        print(f"Image resized from {original_width}x{original_height} to {new_width}x{new_height}")
+    
+    # Convert compressed PIL image to base64 for storage
+    compressed_buffer = io.BytesIO()
+    # Use JPEG with quality 85 for good balance between quality and file size
+    if filename.lower().endswith('.png'):
+        pil_image.save(compressed_buffer, format='PNG', optimize=True)
+        mime_type = 'image/png'
+    else:
+        pil_image.save(compressed_buffer, format='JPEG', quality=85, optimize=True)
+        mime_type = 'image/jpeg'
+    
+    compressed_data = compressed_buffer.getvalue()
+    original_base64 = base64.b64encode(compressed_data).decode('utf-8')
+    
+    # Convert PIL image to numpy array for face_recognition
+    import numpy as np
+    image_data = np.array(pil_image)
+    
+    # Detect faces
     face_locations = face_recognition.face_locations(image_data)
     face_encodings = face_recognition.face_encodings(image_data, face_locations)
     
-    # Save image document
+    # Save image document with base64 data
     image_doc = {
-        "file_path": file_path,
+        "original_image_base64": original_base64,
         "filename": filename,
+        "mime_type": mime_type,
         "faces": [],
         "persons": [],
         "created_at": datetime.datetime.utcnow().isoformat()
@@ -157,8 +213,8 @@ def process_single_image(file, album_id=None, section_id=None):
             person_id = person_result.inserted_id
             print(f"Face {i} assigned to new person: {person_id}")
         
-        # Crop and save the face
-        face_path, face_filename = crop_and_save_face(image_data, location, i, filename)
+        # Crop and get base64 of the face
+        face_base64, face_filename = crop_and_save_face(image_data, location, i, filename)
         
         face_doc = {
             "embedding": encoding.tolist(),
@@ -170,7 +226,7 @@ def process_single_image(file, album_id=None, section_id=None):
                 "bottom": int(location[2]),
                 "left": int(location[3])
             },
-            "cropped_face_path": face_path,
+            "cropped_face_base64": face_base64,
             "cropped_face_filename": face_filename,
             "created_at": datetime.datetime.utcnow().isoformat()
         }
@@ -209,8 +265,8 @@ def process_single_image(file, album_id=None, section_id=None):
     if len(face_encodings) > 0:
         return {
             "message": "File uploaded successfully",
-            "file_path": file_path,
             "filename": filename,
+            "mime_type": mime_type,
             "faces_detected": len(face_encodings),
             "persons_assigned": len(assigned_persons),
             "image_id": str(image_id),
@@ -220,8 +276,8 @@ def process_single_image(file, album_id=None, section_id=None):
     else:
         return {
             "message": "File uploaded successfully (no faces detected)",
-            "file_path": file_path,
             "filename": filename,
+            "mime_type": mime_type,
             "faces_detected": 0,
             "persons_assigned": 0,
             "image_id": str(image_id),
@@ -281,7 +337,7 @@ def get_all_images():
             image_data = {
                 "image_id": str(image["_id"]),
                 "filename": image.get("filename", ""),
-                "file_path": image.get("file_path", ""),
+                "mime_type": image.get("mime_type", "image/jpeg"),
                 "faces_count": len(image_faces),
                 "persons_count": len(persons_in_image),
                 "persons": persons_in_image,
@@ -455,7 +511,7 @@ def get_image_details(image_id):
         return jsonify({
             "image_id": str(image["_id"]),
             "filename": image["filename"],
-            "file_path": image["file_path"],
+            "mime_type": image.get("mime_type", "image/jpeg"),
             "total_faces": len(image_faces),
             "faces": image_faces
         })
@@ -463,11 +519,36 @@ def get_image_details(image_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@images_bp.route('/<filename>/file')
-def serve_image_file(filename):
-    """Serve uploaded images"""
-    from flask import current_app
-    return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
+@images_bp.route('/<image_id>/file')
+def serve_image_file(image_id):
+    """Serve uploaded images from base64 data"""
+    from flask import current_app, Response
+    import base64
+    
+    try:
+        db = current_app.db
+        images_col = db.images
+        
+        # Find image by ID
+        image = images_col.find_one({"_id": ObjectId(image_id)})
+        if not image:
+            return jsonify({"error": "Image not found"}), 404
+        
+        # Get base64 data and mime type
+        base64_data = image.get("original_image_base64")
+        mime_type = image.get("mime_type", "image/jpeg")
+        
+        if not base64_data:
+            return jsonify({"error": "Image data not found"}), 404
+        
+        # Decode base64 data
+        image_data = base64.b64decode(base64_data)
+        
+        # Return image response
+        return Response(image_data, mimetype=mime_type)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @images_bp.route('/search-by-image', methods=['POST'])
 def search_by_image():
