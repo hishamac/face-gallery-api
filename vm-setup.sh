@@ -39,7 +39,7 @@ fi
 
 # Setup Python environment
 echo "🔧 Setting up Python virtual environment..."
-cd /opt/face-api/api
+cd /opt/face-api
 sudo -u face-api python3.9 -m venv venv
 sudo -u face-api venv/bin/pip install --upgrade pip setuptools wheel
 
@@ -51,17 +51,17 @@ sudo -u face-api venv/bin/pip install gunicorn
 # Create necessary directories
 echo "📁 Creating application directories..."
 sudo -u face-api mkdir -p uploads faces logs
-sudo -u face-api mkdir -p /opt/face-api/api/uploads
-sudo -u face-api mkdir -p /opt/face-api/api/faces
+sudo -u face-api mkdir -p /opt/face-api/uploads
+sudo -u face-api mkdir -p /opt/face-api/faces
 
 # Set proper permissions
 chmod 755 /opt/face-api
-chmod -R 755 /opt/face-api/api/uploads
-chmod -R 755 /opt/face-api/api/faces
+chmod -R 755 /opt/face-api/uploads
+chmod -R 755 /opt/face-api/faces
 
 # Create environment file template
 echo "⚙️ Creating environment configuration..."
-cat > /opt/face-api/api/.env.template << EOF
+cat > /opt/face-api/.env.template << EOF
 # Flask Configuration
 FLASK_ENV=production
 SECRET_KEY=CHANGE-THIS-TO-A-SECURE-RANDOM-STRING
@@ -72,8 +72,8 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/face_gallery?ret
 DATABASE_NAME=face_gallery
 
 # File Configuration
-UPLOAD_FOLDER=/opt/face-api/api/uploads
-FACES_FOLDER=/opt/face-api/api/faces
+UPLOAD_FOLDER=/opt/face-api/uploads
+FACES_FOLDER=/opt/face-api/faces
 MAX_CONTENT_LENGTH=16777216
 
 # Face Recognition Configuration
@@ -89,7 +89,7 @@ CORS_ORIGINS=*
 PORT=5000
 EOF
 
-chown face-api:face-api /opt/face-api/api/.env.template
+chown face-api:face-api /opt/face-api/.env.template
 
 # Create systemd service
 echo "🔄 Creating systemd service..."
@@ -102,10 +102,10 @@ After=network.target
 Type=exec
 User=face-api
 Group=face-api
-WorkingDirectory=/opt/face-api/api
-Environment=PATH=/opt/face-api/api/venv/bin
-EnvironmentFile=/opt/face-api/api/.env
-ExecStart=/opt/face-api/api/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 --timeout 300 --max-requests 1000 --access-logfile /opt/face-api/api/logs/access.log --error-logfile /opt/face-api/api/logs/error.log app:app
+WorkingDirectory=/opt/face-api
+Environment=PATH=/opt/face-api/venv/bin
+EnvironmentFile=/opt/face-api/.env
+ExecStart=/opt/face-api/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 --timeout 300 --max-requests 1000 --access-logfile /opt/face-api/logs/access.log --error-logfile /opt/face-api/logs/error.log app:app
 ExecReload=/bin/kill -s HUP \$MAINPID
 Restart=always
 RestartSec=10
@@ -159,7 +159,7 @@ server {
     
     # Serve uploaded images directly
     location /uploads/ {
-        alias /opt/face-api/api/uploads/;
+        alias /opt/face-api/uploads/;
         expires 1d;
         add_header Cache-Control "public, immutable";
         add_header 'Access-Control-Allow-Origin' '*' always;
@@ -167,7 +167,7 @@ server {
     
     # Serve face images directly
     location /faces/ {
-        alias /opt/face-api/api/faces/;
+        alias /opt/face-api/faces/;
         expires 1d;
         add_header Cache-Control "public, immutable";
         add_header 'Access-Control-Allow-Origin' '*' always;
@@ -191,7 +191,7 @@ nginx -t
 
 # Create log rotation
 cat > /etc/logrotate.d/face-api << EOF
-/opt/face-api/api/logs/*.log {
+/opt/face-api/logs/*.log {
     daily
     missingok
     rotate 14
@@ -211,7 +211,7 @@ cat > /opt/face-api/update.sh << EOF
 echo "🔄 Updating Face Recognition API..."
 cd /opt/face-api
 sudo -u face-api git pull origin main
-cd api
+cd /opt/face-api
 sudo -u face-api venv/bin/pip install -r requirements.txt
 systemctl restart face-api
 echo "✅ Update completed!"
@@ -238,7 +238,7 @@ echo "💽 Disk Usage:"
 df -h /
 echo
 echo "📈 API Logs (last 10 lines):"
-tail -n 10 /opt/face-api/api/logs/error.log 2>/dev/null || echo "No error logs yet"
+tail -n 10 /opt/face-api/logs/error.log 2>/dev/null || echo "No error logs yet"
 EOF
 
 chmod +x /opt/face-api/monitor.sh
@@ -270,8 +270,8 @@ echo
 echo "⚠️  IMPORTANT: Complete these steps manually:"
 echo
 echo "1. Create your environment file:"
-echo "   sudo cp /opt/face-api/api/.env.template /opt/face-api/api/.env"
-echo "   sudo nano /opt/face-api/api/.env"
+echo "   sudo cp /opt/face-api/.env.template /opt/face-api/.env"
+echo "   sudo nano /opt/face-api/.env"
 echo "   (Update MongoDB URI and secret key)"
 echo
 echo "2. Start the API service:"
@@ -292,10 +292,10 @@ echo "   face-update    - Update from GitHub"
 echo "   face-monitor   - System monitoring"
 echo
 echo "📁 Important paths:"
-echo "   API Code: /opt/face-api/api/"
-echo "   Logs: /opt/face-api/api/logs/"
-echo "   Uploads: /opt/face-api/api/uploads/"
-echo "   Faces: /opt/face-api/api/faces/"
+echo "   API Code: /opt/face-api/"
+echo "   Logs: /opt/face-api/logs/"
+echo "   Uploads: /opt/face-api/uploads/"
+echo "   Faces: /opt/face-api/faces/"
 echo
 echo "🔧 Next steps:"
 echo "   1. Configure your .env file with MongoDB connection"

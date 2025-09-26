@@ -33,8 +33,8 @@ chmod +x vm-setup.sh
 
 ```bash
 # 1. Create environment file
-sudo cp /opt/face-api/api/.env.template /opt/face-api/api/.env
-sudo nano /opt/face-api/api/.env
+sudo cp /opt/face-api/.env.template /opt/face-api/.env
+sudo nano /opt/face-api/.env
 ```
 
 **Update these values in the .env file**:

@@ -125,7 +125,7 @@ Deploy your `hishamac/face-gallery-api` repository directly from GitHub to Googl
 1. **Repository**: Select `hishamac/face-gallery-api`
 2. **Branch**: `^main$`
 3. **Build Type**: Dockerfile
-4. **Source Location**: `/api/Dockerfile` (important: your API is in the api folder!)
+4. **Source Location**: `/Dockerfile` (your API files are in the repository root)
 5. Click "SAVE"
 
 ### 4.5 Configure Service
