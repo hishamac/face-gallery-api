@@ -1,0 +1,28 @@
+runtime: python311
+
+# App Engine automatically scales based on incoming requests
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10
+  target_cpu_utilization: 0.6
+
+# Environment variables
+env_variables:
+  FLASK_ENV: production
+  PORT: 8080
+  UPLOAD_FOLDER: /tmp/uploads
+  FACES_FOLDER: /tmp/faces
+
+# Handle large files and longer timeouts for face processing
+entrypoint: gunicorn -b :$PORT -w 1 --threads 8 --timeout 300 --max-requests 1000 --max-requests-jitter 100 app:app
+
+# Skip files for deployment
+skip_files:
+  - ^(.*/)?#.*#$
+  - ^(.*/)?.*~$
+  - ^(.*/)?.*\.py[co]$
+  - ^(.*/)?.*/RCS/.*$
+  - ^(.*/)?\..*$
+  - ^(.*/)?.*\.bak$
+  - ^(.*/)?venv/.*$
+  - ^(.*/)?__pycache__/.*$
