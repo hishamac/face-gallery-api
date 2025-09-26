@@ -1,0 +1,28 @@
+# Ignore development files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+venv/
+.git/
+.gitignore
+
+# Ignore large files and folders that aren't needed for deployment
+uploads/
+faces/
+*.whl
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

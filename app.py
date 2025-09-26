@@ -125,5 +125,8 @@ def reset_database():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# For Vercel deployment, the app needs to be available at module level
+# The app instance is already created above and will be used by Vercel
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
