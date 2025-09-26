@@ -130,6 +130,7 @@ dmypy.json
 
 # Project specific
 uploads/
+faces/
 *.jpg
 *.jpeg
 *.png
