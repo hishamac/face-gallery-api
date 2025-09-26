@@ -63,26 +63,26 @@ chmod -R 755 /opt/face-api/faces
 echo "⚙️ Creating environment configuration..."
 cat > /opt/face-api/.env.template << EOF
 # Flask Configuration
-FLASK_ENV=production
-SECRET_KEY=CHANGE-THIS-TO-A-SECURE-RANDOM-STRING
-FLASK_DEBUG=False
+FLASK_ENV=development
+FLASK_DEBUG=True
+SECRET_KEY=your-secret-key-change-in-production
 
-# MongoDB Configuration (Replace with your MongoDB Atlas connection string)
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/face_gallery?retryWrites=true&w=majority
-DATABASE_NAME=face_gallery
+# MongoDB Configuration
+MONGODB_URI=mongodb+srv://cdgprjs:cdgprjs@cluster0.ff19f.mongodb.net/1dfasdf?retryWrites=true&w=majority&appName=Cluster0
+DATABASE_NAME=face_galleryw
 
-# File Configuration
-UPLOAD_FOLDER=/opt/face-api/uploads
-FACES_FOLDER=/opt/face-api/faces
+# Upload Configuration
+UPLOAD_FOLDER=uploads
+FACES_FOLDER=faces
 MAX_CONTENT_LENGTH=16777216
 
-# Face Recognition Configuration
+# Clustering Configuration
 DBSCAN_EPS=0.4
-DBSCAN_MIN_SAMPLES=2
-FACE_RECOGNITION_TOLERANCE=0.6
+DBSCAN_MIN_SAMPLES=1
+FACE_RECOGNITION_TOLERANCE=0.5
 MIN_FACE_SIZE=50
 
-# CORS Configuration (Update with your frontend domain)
+# CORS Configuration
 CORS_ORIGINS=*
 
 # Server Configuration
