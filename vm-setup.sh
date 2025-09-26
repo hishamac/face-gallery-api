@@ -5,28 +5,35 @@
 
 set -e  # Exit on any error
 
+# Check if running as root or with sudo
+if [[ $EUID -ne 0 ]]; then
+   echo "❌ This script must be run as root or with sudo" 
+   echo "Usage: sudo ./vm-setup.sh"
+   exit 1
+fi
+
 echo "🚀 Starting Face Recognition API VM Setup..."
 
 # Update system packages
 echo "📦 Updating system packages..."
-apt-get update
-apt-get upgrade -y
+sudo apt-get update
+sudo apt-get upgrade -y
 
 # Install Python 3.9 and essential packages
 echo "🐍 Installing Python and dependencies..."
-apt-get install -y python3 python3-pip python3-dev python3-venv
-apt-get install -y build-essential cmake pkg-config
-apt-get install -y libopenblas-dev liblapack-dev libatlas-base-dev
-apt-get install -y libx11-dev libgtk-3-dev
-apt-get install -y libavcodec-dev libavformat-dev libswscale-dev
-apt-get install -y libjpeg-dev libpng-dev libtiff-dev
-apt-get install -y git curl nginx htop
+sudo apt-get install -y python3 python3-pip python3-dev python3-venv
+sudo apt-get install -y build-essential cmake pkg-config
+sudo apt-get install -y libopenblas-dev liblapack-dev libatlas-base-dev
+sudo apt-get install -y libx11-dev libgtk-3-dev
+sudo apt-get install -y libavcodec-dev libavformat-dev libswscale-dev
+sudo apt-get install -y libjpeg-dev libpng-dev libtiff-dev
+sudo apt-get install -y git curl nginx htop
 
 # Create application user
 echo "👤 Creating application user..."
-useradd -r -s /bin/bash -d /opt/face-api face-api || true
-mkdir -p /opt/face-api
-chown face-api:face-api /opt/face-api
+sudo useradd -r -s /bin/bash -d /opt/face-api face-api || true
+sudo mkdir -p /opt/face-api
+sudo chown face-api:face-api /opt/face-api
 
 # Clone repository as face-api user
 echo "📥 Cloning repository..."
@@ -55,13 +62,13 @@ echo "📁 Creating application directories..."
 sudo -u face-api mkdir -p uploads faces logs
 
 # Set proper permissions
-chmod 755 /opt/face-api
-chmod -R 755 /opt/face-api/uploads
-chmod -R 755 /opt/face-api/faces
+sudo chmod 755 /opt/face-api
+sudo chmod -R 755 /opt/face-api/uploads
+sudo chmod -R 755 /opt/face-api/faces
 
 # Create environment file template
 echo "⚙️ Creating environment configuration..."
-cat > /opt/face-api/.env.template << EOF
+sudo tee /opt/face-api/.env.template > /dev/null << EOF
 # Flask Configuration
 FLASK_ENV=development
 FLASK_DEBUG=True
@@ -83,17 +90,17 @@ FACE_RECOGNITION_TOLERANCE=0.5
 MIN_FACE_SIZE=50
 
 # CORS Configuration
-CORS_ORIGINS=*
+CORS_ORIGINS=https://face-gallery-client.vercel.app
 
 # Server Configuration
 PORT=5000
 EOF
 
-chown face-api:face-api /opt/face-api/.env.template
+sudo chown face-api:face-api /opt/face-api/.env.template
 
 # Create systemd service
 echo "🔄 Creating systemd service..."
-cat > /etc/systemd/system/face-api.service << EOF
+sudo tee /etc/systemd/system/face-api.service > /dev/null << EOF
 [Unit]
 Description=Face Recognition API
 After=network.target
@@ -116,7 +123,7 @@ EOF
 
 # Configure Nginx
 echo "🌐 Configuring Nginx..."
-cat > /etc/nginx/sites-available/face-api << EOF
+sudo tee /etc/nginx/sites-available/face-api > /dev/null << EOF
 server {
     listen 80;
     server_name _;
@@ -183,14 +190,112 @@ server {
 EOF
 
 # Enable Nginx site
-ln -sf /etc/nginx/sites-available/face-api /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
+sudo ln -sf /etc/nginx/sites-available/face-api /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test Nginx configuration
-nginx -t
+sudo nginx -t
+
+# Create self-signed SSL certificate for HTTPS
+echo "🔐 Creating self-signed SSL certificate..."
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/face-api.key \
+    -out /etc/nginx/ssl/face-api.crt \
+    -subj "/C=US/ST=State/L=City/O=Organization/OU=OrgUnit/CN=face-api"
+
+# Set proper permissions for SSL files
+sudo chmod 600 /etc/nginx/ssl/face-api.key
+sudo chmod 644 /etc/nginx/ssl/face-api.crt
+
+# Update Nginx configuration to support HTTPS
+echo "🌐 Updating Nginx configuration for HTTPS..."
+sudo tee /etc/nginx/sites-available/face-api > /dev/null << EOF
+# HTTP server - redirect to HTTPS
+server {
+    listen 80;
+    server_name _;
+    return 301 https://\$server_name\$request_uri;
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name _;
+    
+    # SSL Configuration
+    ssl_certificate /etc/nginx/ssl/face-api.crt;
+    ssl_certificate_key /etc/nginx/ssl/face-api.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # Increase client max body size for image uploads
+    client_max_body_size 50M;
+    
+    # Security headers
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+    
+    # API endpoints
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # Increase timeout for face processing
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # CORS headers (customize as needed)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        
+        # Handle preflight requests
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain; charset=utf-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+    
+    # Serve uploaded images directly
+    location /uploads/ {
+        alias /opt/face-api/uploads/;
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+        add_header 'Access-Control-Allow-Origin' '*' always;
+    }
+    
+    # Serve face images directly
+    location /faces/ {
+        alias /opt/face-api/faces/;
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+        add_header 'Access-Control-Allow-Origin' '*' always;
+    }
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+EOF
 
 # Create log rotation
-cat > /etc/logrotate.d/face-api << EOF
+sudo tee /etc/logrotate.d/face-api > /dev/null << EOF
 /opt/face-api/logs/*.log {
     daily
     missingok
@@ -206,30 +311,30 @@ cat > /etc/logrotate.d/face-api << EOF
 EOF
 
 # Create update script
-cat > /opt/face-api/update.sh << EOF
+sudo tee /opt/face-api/update.sh > /dev/null << EOF
 #!/bin/bash
 echo "🔄 Updating Face Recognition API..."
 cd /opt/face-api
 sudo -u face-api git pull origin main
 cd /opt/face-api
 sudo -u face-api venv/bin/pip install -r requirements.txt
-systemctl restart face-api
+sudo systemctl restart face-api
 echo "✅ Update completed!"
 EOF
 
-chmod +x /opt/face-api/update.sh
+sudo chmod +x /opt/face-api/update.sh
 
 # Create monitoring script
-cat > /opt/face-api/monitor.sh << EOF
+sudo tee /opt/face-api/monitor.sh > /dev/null << EOF
 #!/bin/bash
 echo "📊 Face API System Status"
 echo "========================"
 echo
 echo "🔄 Service Status:"
-systemctl status face-api --no-pager -l
+sudo systemctl status face-api --no-pager -l
 echo
 echo "🌐 Nginx Status:"
-systemctl status nginx --no-pager -l
+sudo systemctl status nginx --no-pager -l
 echo
 echo "💾 Memory Usage:"
 free -h
@@ -241,10 +346,10 @@ echo "📈 API Logs (last 10 lines):"
 tail -n 10 /opt/face-api/logs/error.log 2>/dev/null || echo "No error logs yet"
 EOF
 
-chmod +x /opt/face-api/monitor.sh
+sudo chmod +x /opt/face-api/monitor.sh
 
 # Create validation script
-cat > /opt/face-api/validate-setup.sh << EOF
+sudo tee /opt/face-api/validate-setup.sh > /dev/null << EOF
 #!/bin/bash
 echo "🔍 Validating Face API Setup..."
 echo "=============================="
@@ -276,21 +381,81 @@ echo "4. Directories:"
 
 # Check services
 echo "5. Services:"
-systemctl is-enabled nginx >/dev/null && echo "   ✅ Nginx enabled" || echo "   ❌ Nginx not enabled"
-systemctl is-active nginx >/dev/null && echo "   ✅ Nginx running" || echo "   ❌ Nginx not running"
+sudo systemctl is-enabled nginx >/dev/null && echo "   ✅ Nginx enabled" || echo "   ❌ Nginx not enabled"
+sudo systemctl is-active nginx >/dev/null && echo "   ✅ Nginx running" || echo "   ❌ Nginx not running"
 
 echo
 echo "Setup validation completed!"
 echo "Next: Create .env file and start face-api service"
 EOF
 
-chmod +x /opt/face-api/validate-setup.sh
+sudo chmod +x /opt/face-api/validate-setup.sh
+
+# Create Let's Encrypt setup script (for when domain is available)
+sudo tee /opt/face-api/setup-letsencrypt.sh > /dev/null << EOF
+#!/bin/bash
+echo "🔐 Setting up Let's Encrypt SSL Certificate..."
+echo "============================================="
+
+# Check if domain is provided
+if [ -z "\$1" ]; then
+    echo "❌ Please provide your domain name"
+    echo "Usage: sudo /opt/face-api/setup-letsencrypt.sh your-domain.com"
+    exit 1
+fi
+
+DOMAIN=\$1
+
+echo "📦 Installing Certbot..."
+sudo apt-get update
+sudo apt-get install -y certbot python3-certbot-nginx
+
+echo "🔒 Obtaining SSL certificate for \$DOMAIN..."
+sudo certbot --nginx -d \$DOMAIN --non-interactive --agree-tos --email admin@\$DOMAIN
+
+echo "⚙️ Setting up auto-renewal..."
+echo "0 12 * * * /usr/bin/certbot renew --quiet" | sudo crontab -
+
+echo "✅ Let's Encrypt SSL setup completed!"
+echo "Your API is now available at: https://\$DOMAIN"
+EOF
+
+sudo chmod +x /opt/face-api/setup-letsencrypt.sh
+
+# Create IP-to-HTTPS access script
+sudo tee /opt/face-api/get-https-access.sh > /dev/null << EOF
+#!/bin/bash
+echo "🌐 HTTPS Access Information"
+echo "=========================="
+
+# Get external IP
+EXTERNAL_IP=\$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google' 2>/dev/null || curl -s https://ipinfo.io/ip 2>/dev/null || echo "Unable to detect")
+
+echo "🔒 HTTPS URLs (Self-signed certificate):"
+echo "   Local:    https://localhost/"
+echo "   External: https://\$EXTERNAL_IP/"
+echo
+echo "⚠️  Browser Security Warning:"
+echo "   - Click 'Advanced' or 'Show Details'"
+echo "   - Click 'Proceed to localhost (unsafe)' or similar"
+echo "   - This is normal for self-signed certificates"
+echo
+echo "🔐 For trusted certificates:"
+echo "   1. Get a domain name"
+echo "   2. Point domain to this IP: \$EXTERNAL_IP"
+echo "   3. Run: sudo /opt/face-api/setup-letsencrypt.sh your-domain.com"
+echo
+echo "🧪 Test HTTPS connection:"
+echo "   curl -k https://\$EXTERNAL_IP/"
+EOF
+
+sudo chmod +x /opt/face-api/get-https-access.sh
 
 # Enable and start services
 echo "🏁 Starting services..."
-systemctl daemon-reload
-systemctl enable nginx
-systemctl restart nginx
+sudo systemctl daemon-reload
+sudo systemctl enable nginx
+sudo systemctl restart nginx
 
 # Note: Don't start face-api service yet - needs .env file first
 
@@ -307,7 +472,7 @@ fi
 # Only create aliases if we have a valid user home directory
 if [ -d "$USER_HOME" ] && [ "$USER_NAME" != "root" ]; then
     echo "📝 Creating helpful aliases for user $USER_NAME..."
-    cat > "$USER_HOME/.bash_aliases" << EOF
+    sudo tee "$USER_HOME/.bash_aliases" > /dev/null << EOF
 # Face API aliases
 alias face-status='sudo systemctl status face-api'
 alias face-logs='sudo journalctl -u face-api -f'
@@ -317,8 +482,10 @@ alias face-monitor='sudo /opt/face-api/monitor.sh'
 alias face-validate='sudo /opt/face-api/validate-setup.sh'
 alias nginx-test='sudo nginx -t'
 alias nginx-reload='sudo systemctl reload nginx'
+alias https-info='sudo /opt/face-api/get-https-access.sh'
+alias setup-ssl='sudo /opt/face-api/setup-letsencrypt.sh'
 EOF
-    chown $USER_NAME:$USER_NAME "$USER_HOME/.bash_aliases"
+    sudo chown $USER_NAME:$USER_NAME "$USER_HOME/.bash_aliases"
     echo "✅ Aliases created in $USER_HOME/.bash_aliases"
 else
     echo "⚠️  Skipping alias creation - no suitable user home directory found"
@@ -347,8 +514,11 @@ echo "4. Check service status:"
 echo "   face-status"
 echo
 echo "5. Test your API:"
+echo "   # HTTP (will redirect to HTTPS):"
 echo "   curl http://localhost/"
-echo "   curl http://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google')/"
+echo "   # HTTPS (self-signed certificate):"
+echo "   curl -k https://localhost/"
+echo "   curl -k https://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google')/"
 echo
 echo "📋 Useful commands:"
 echo "   face-status    - Check API status"
@@ -357,6 +527,8 @@ echo "   face-restart   - Restart API"
 echo "   face-update    - Update from GitHub"
 echo "   face-monitor   - System monitoring"
 echo "   face-validate  - Validate setup"
+echo "   https-info     - Get HTTPS access URLs"
+echo "   setup-ssl      - Setup Let's Encrypt (requires domain)"
 echo
 echo "📁 Important paths:"
 echo "   API Code: /opt/face-api/"
@@ -367,7 +539,13 @@ echo
 echo "🔧 Next steps:"
 echo "   1. Configure your .env file with MongoDB connection"
 echo "   2. Start the service"
-echo "   3. Point your domain to this VM's external IP"
-echo "   4. Set up SSL with Let's Encrypt (optional)"
+echo "   3. Access your API via HTTPS (self-signed certificate)"
+echo "   4. For production: Get a domain and use Let's Encrypt for trusted SSL"
+echo
+echo "🔐 SSL Information:"
+echo "   - Self-signed certificate created for immediate HTTPS"
+echo "   - Browsers will show security warning (click 'Advanced' -> 'Proceed')"
+echo "   - HTTP traffic automatically redirects to HTTPS"
+echo "   - For trusted certificates, get a domain and use Let's Encrypt"
 echo
 echo "✅ Setup completed successfully!"
