@@ -59,12 +59,10 @@ sudo -u face-api venv/bin/pip install gunicorn
 
 # Create necessary directories
 echo "📁 Creating application directories..."
-sudo -u face-api mkdir -p uploads faces logs
+sudo -u face-api mkdir -p logs
 
 # Set proper permissions
 sudo chmod 755 /opt/face-api
-sudo chmod -R 755 /opt/face-api/uploads
-sudo chmod -R 755 /opt/face-api/faces
 
 # Create environment file template
 echo "⚙️ Creating environment configuration..."
@@ -78,9 +76,7 @@ SECRET_KEY=your-secret-key-change-in-production
 MONGODB_URI=mongodb+srv://cdgprjs:cdgprjs@cluster0.ff19f.mongodb.net/1dfasdf?retryWrites=true&w=majority&appName=Cluster0
 DATABASE_NAME=face_galleryw
 
-# Upload Configuration
-UPLOAD_FOLDER=uploads
-FACES_FOLDER=faces
+# Upload Configuration (Base64 Storage - No File System Storage)
 MAX_CONTENT_LENGTH=16777216
 
 # Clustering Configuration
@@ -182,20 +178,6 @@ server {
         # Flask handles CORS headers
     }
     
-    # Serve uploaded images directly
-    location /uploads/ {
-        alias /opt/face-api/uploads/;
-        expires 1d;
-        add_header Cache-Control "public, immutable";
-    }
-    
-    # Serve face images directly
-    location /faces/ {
-        alias /opt/face-api/faces/;
-        expires 1d;
-        add_header Cache-Control "public, immutable";
-    }
-    
     # Health check endpoint
     location /health {
         access_log off;
@@ -293,8 +275,6 @@ echo "3. Application Files:"
 
 # Check directories
 echo "4. Directories:"
-[ -d "/opt/face-api/uploads" ] && echo "   ✅ uploads directory" || echo "   ❌ uploads directory missing"
-[ -d "/opt/face-api/faces" ] && echo "   ✅ faces directory" || echo "   ❌ faces directory missing"
 [ -d "/opt/face-api/logs" ] && echo "   ✅ logs directory" || echo "   ❌ logs directory missing"
 
 # Check services
@@ -425,6 +405,7 @@ echo
 echo "✅ Setup Features:"
 echo "   - HTTPS enabled with self-signed certificate"
 echo "   - Flask handles CORS headers for proper client access"
+echo "   - Base64 storage system (no file system dependencies)"
 echo "   - Automated service management and monitoring tools"
 echo
 echo "⚠️  IMPORTANT: Complete these steps manually:"
@@ -464,14 +445,17 @@ echo
 echo "📁 Important paths:"
 echo "   API Code: /opt/face-api/"
 echo "   Logs: /opt/face-api/logs/"
-echo "   Uploads: /opt/face-api/uploads/"
-echo "   Faces: /opt/face-api/faces/"
 echo
 echo "🔧 Next steps:"
 echo "   1. Configure your .env file with MongoDB connection"
 echo "   2. Start the service"
 echo "   3. Access your API via HTTPS (self-signed certificate)"
 echo "   4. For production: Get a domain and use Let's Encrypt for trusted SSL"
+echo
+echo "💾 Storage System:"
+echo "   - Uses base64 storage in MongoDB (no local file storage)"
+echo "   - Images and faces served dynamically from database"
+echo "   - Cloud-ready deployment with no file system dependencies"
 echo
 echo "🔐 SSL Information:"
 echo "   - Self-signed certificate created for immediate HTTPS"
