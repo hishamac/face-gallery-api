@@ -295,7 +295,19 @@ systemctl restart nginx
 # Note: Don't start face-api service yet - needs .env file first
 
 # Create helpful aliases
-cat > /home/ubuntu/.bash_aliases << EOF
+# Determine the non-root user's home directory
+if [ "$SUDO_USER" ]; then
+    USER_HOME=$(eval echo ~$SUDO_USER)
+    USER_NAME=$SUDO_USER
+else
+    USER_HOME=$HOME
+    USER_NAME=$(whoami)
+fi
+
+# Only create aliases if we have a valid user home directory
+if [ -d "$USER_HOME" ] && [ "$USER_NAME" != "root" ]; then
+    echo "📝 Creating helpful aliases for user $USER_NAME..."
+    cat > "$USER_HOME/.bash_aliases" << EOF
 # Face API aliases
 alias face-status='sudo systemctl status face-api'
 alias face-logs='sudo journalctl -u face-api -f'
@@ -306,6 +318,11 @@ alias face-validate='sudo /opt/face-api/validate-setup.sh'
 alias nginx-test='sudo nginx -t'
 alias nginx-reload='sudo systemctl reload nginx'
 EOF
+    chown $USER_NAME:$USER_NAME "$USER_HOME/.bash_aliases"
+    echo "✅ Aliases created in $USER_HOME/.bash_aliases"
+else
+    echo "⚠️  Skipping alias creation - no suitable user home directory found"
+fi
 
 # Final instructions
 echo
