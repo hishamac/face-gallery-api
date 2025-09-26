@@ -14,13 +14,13 @@ apt-get upgrade -y
 
 # Install Python 3.9 and essential packages
 echo "🐍 Installing Python and dependencies..."
-apt-get install -y python3.9 python3.9-pip python3.9-dev python3.9-venv
+apt-get install -y python3 python3-pip python3-dev python3-venv
 apt-get install -y build-essential cmake pkg-config
 apt-get install -y libopenblas-dev liblapack-dev libatlas-base-dev
 apt-get install -y libx11-dev libgtk-3-dev
 apt-get install -y libavcodec-dev libavformat-dev libswscale-dev
 apt-get install -y libjpeg-dev libpng-dev libtiff-dev
-apt-get install -y git curl nginx supervisor htop
+apt-get install -y git curl nginx htop
 
 # Create application user
 echo "👤 Creating application user..."
@@ -40,19 +40,19 @@ fi
 # Setup Python environment
 echo "🔧 Setting up Python virtual environment..."
 cd /opt/face-api
-sudo -u face-api python3.9 -m venv venv
+sudo -u face-api python3 -m venv venv
 sudo -u face-api venv/bin/pip install --upgrade pip setuptools wheel
 
 # Install Python dependencies
 echo "📚 Installing Python dependencies..."
+# Install dlib first (it's often problematic)
+sudo -u face-api venv/bin/pip install dlib
 sudo -u face-api venv/bin/pip install -r requirements.txt
 sudo -u face-api venv/bin/pip install gunicorn
 
 # Create necessary directories
 echo "📁 Creating application directories..."
 sudo -u face-api mkdir -p uploads faces logs
-sudo -u face-api mkdir -p /opt/face-api/uploads
-sudo -u face-api mkdir -p /opt/face-api/faces
 
 # Set proper permissions
 chmod 755 /opt/face-api
@@ -105,7 +105,7 @@ Group=face-api
 WorkingDirectory=/opt/face-api
 Environment=PATH=/opt/face-api/venv/bin
 EnvironmentFile=/opt/face-api/.env
-ExecStart=/opt/face-api/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 --timeout 300 --max-requests 1000 --access-logfile /opt/face-api/logs/access.log --error-logfile /opt/face-api/logs/error.log app:app
+ExecStart=/opt/face-api/venv/bin/gunicorn --workers 1 --bind 127.0.0.1:5000 --timeout 300 --max-requests 1000 --access-logfile /opt/face-api/logs/access.log --error-logfile /opt/face-api/logs/error.log app:app
 ExecReload=/bin/kill -s HUP \$MAINPID
 Restart=always
 RestartSec=10
@@ -243,12 +243,56 @@ EOF
 
 chmod +x /opt/face-api/monitor.sh
 
+# Create validation script
+cat > /opt/face-api/validate-setup.sh << EOF
+#!/bin/bash
+echo "🔍 Validating Face API Setup..."
+echo "=============================="
+
+# Check Python environment
+echo "1. Python Environment:"
+if [ -f "/opt/face-api/venv/bin/python" ]; then
+    echo "   ✅ Virtual environment exists"
+    /opt/face-api/venv/bin/python --version
+else
+    echo "   ❌ Virtual environment missing"
+fi
+
+# Check dependencies
+echo "2. Dependencies:"
+/opt/face-api/venv/bin/pip list | grep -E "(flask|face-recognition|dlib|gunicorn)" || echo "   ❌ Some dependencies missing"
+
+# Check files
+echo "3. Application Files:"
+[ -f "/opt/face-api/app.py" ] && echo "   ✅ app.py found" || echo "   ❌ app.py missing"
+[ -f "/opt/face-api/requirements.txt" ] && echo "   ✅ requirements.txt found" || echo "   ❌ requirements.txt missing"
+[ -f "/opt/face-api/.env.template" ] && echo "   ✅ .env.template found" || echo "   ❌ .env.template missing"
+
+# Check directories
+echo "4. Directories:"
+[ -d "/opt/face-api/uploads" ] && echo "   ✅ uploads directory" || echo "   ❌ uploads directory missing"
+[ -d "/opt/face-api/faces" ] && echo "   ✅ faces directory" || echo "   ❌ faces directory missing"
+[ -d "/opt/face-api/logs" ] && echo "   ✅ logs directory" || echo "   ❌ logs directory missing"
+
+# Check services
+echo "5. Services:"
+systemctl is-enabled nginx >/dev/null && echo "   ✅ Nginx enabled" || echo "   ❌ Nginx not enabled"
+systemctl is-active nginx >/dev/null && echo "   ✅ Nginx running" || echo "   ❌ Nginx not running"
+
+echo
+echo "Setup validation completed!"
+echo "Next: Create .env file and start face-api service"
+EOF
+
+chmod +x /opt/face-api/validate-setup.sh
+
 # Enable and start services
 echo "🏁 Starting services..."
 systemctl daemon-reload
-systemctl enable face-api
 systemctl enable nginx
 systemctl restart nginx
+
+# Note: Don't start face-api service yet - needs .env file first
 
 # Create helpful aliases
 cat > /home/ubuntu/.bash_aliases << EOF
@@ -258,6 +302,7 @@ alias face-logs='sudo journalctl -u face-api -f'
 alias face-restart='sudo systemctl restart face-api'
 alias face-update='sudo /opt/face-api/update.sh'
 alias face-monitor='sudo /opt/face-api/monitor.sh'
+alias face-validate='sudo /opt/face-api/validate-setup.sh'
 alias nginx-test='sudo nginx -t'
 alias nginx-reload='sudo systemctl reload nginx'
 EOF
@@ -275,12 +320,16 @@ echo "   sudo nano /opt/face-api/.env"
 echo "   (Update MongoDB URI and secret key)"
 echo
 echo "2. Start the API service:"
+echo "   sudo systemctl enable face-api"
 echo "   sudo systemctl start face-api"
 echo
-echo "3. Check service status:"
-echo "   sudo systemctl status face-api"
+echo "3. Validate setup:"
+echo "   face-validate"
 echo
-echo "4. Test your API:"
+echo "4. Check service status:"
+echo "   face-status"
+echo
+echo "5. Test your API:"
 echo "   curl http://localhost/"
 echo "   curl http://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google')/"
 echo
@@ -290,6 +339,7 @@ echo "   face-logs      - View live logs"
 echo "   face-restart   - Restart API"
 echo "   face-update    - Update from GitHub"
 echo "   face-monitor   - System monitoring"
+echo "   face-validate  - Validate setup"
 echo
 echo "📁 Important paths:"
 echo "   API Code: /opt/face-api/"

@@ -9,8 +9,8 @@
 3. **Configure**:
    - **Name**: `face-api-vm`
    - **Region**: `us-central1-a`
-   - **Machine type**: `e2-standard-4` (4 vCPU, 16 GB RAM)
-   - **Boot disk**: Ubuntu 20.04 LTS, 50 GB SSD
+   - **Machine type**: `e2-medium` (1 vCPU, 4 GB RAM) - Cost optimized
+   - **Boot disk**: Ubuntu 20.04 LTS, 30 GB SSD
    - **Firewall**: ✅ Allow HTTP traffic, ✅ Allow HTTPS traffic
 
 4. **Advanced Options** → **Management** → **Startup script**:
@@ -20,7 +20,7 @@ Copy and paste this entire script:
 ```bash
 #!/bin/bash
 cd /tmp
-curl -O https://raw.githubusercontent.com/hishamac/face-gallery-api/main/api/vm-setup.sh
+curl -O https://raw.githubusercontent.com/hishamac/face-gallery-api/main/vm-setup.sh
 chmod +x vm-setup.sh
 ./vm-setup.sh 2>&1 | tee setup.log
 ```
@@ -45,10 +45,14 @@ CORS_ORIGINS=https://your-frontend-domain.com
 ```
 
 ```bash
-# 2. Start the API service
+# 2. Enable and start the API service
+sudo systemctl enable face-api
 sudo systemctl start face-api
 
-# 3. Check everything is working
+# 3. Validate everything is working
+face-validate
+
+# 4. Check service status
 face-status
 ```
 
@@ -70,7 +74,7 @@ Your Face Recognition API is now running on:
 - **VM**: Google Cloud Compute Engine
 - **URL**: `http://YOUR_VM_EXTERNAL_IP`
 - **Features**: Nginx reverse proxy, systemd service, automatic restarts
-- **Cost**: ~$120/month (if running 24/7)
+- **Cost**: ~$25-30/month (if running 24/7)
 
 ## 📋 Useful Commands
 
@@ -80,6 +84,7 @@ face-logs       # View live logs
 face-restart    # Restart API service
 face-update     # Update from GitHub
 face-monitor    # Full system status
+face-validate   # Validate setup
 ```
 
 ## 💡 VM vs Cloud Run Comparison
@@ -87,7 +92,7 @@ face-monitor    # Full system status
 | Feature | **VM** | **Cloud Run** |
 |---------|---------|---------------|
 | **Setup** | Manual configuration | Automatic |
-| **Cost** | $120/month fixed | $0-50/month variable |
+| **Cost** | $25-30/month fixed | $0-50/month variable |
 | **Control** | Full server control | Limited |
 | **Scaling** | Manual | Automatic |
 | **Maintenance** | You manage | Google manages |
