@@ -99,7 +99,7 @@ def process_single_image(file, album_id=None, section_id=None):
     # Check file size (max 10MB)
     max_size = 10 * 1024 * 1024  # 10MB
     if len(file_data) > max_size:
-        return {"error": f"File too large. Maximum size is {max_size // (1024*1024)}MB"}, 413
+        return {"status": "error", "message": f"File too large. Maximum size is {max_size // (1024*1024)}MB"}, 413
     
     # Load image for compression and processing
     temp_file = io.BytesIO(file_data)
@@ -352,6 +352,7 @@ def get_all_images():
         all_images.sort(key=lambda x: x.get("upload_date", ""), reverse=True)
         
         return jsonify({
+            "status": "success",
             "images": all_images,
             "total_images": len(all_images),
             "images_with_faces": len([img for img in all_images if img["has_faces"]]),
@@ -359,7 +360,7 @@ def get_all_images():
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @images_bp.route('/upload', methods=['POST'])
 def upload_image():
@@ -369,13 +370,13 @@ def upload_image():
         
         # Check if file is present
         if 'file' not in request.files:
-            return jsonify({"error": "No file part"}), 400
+            return jsonify({"status": "error", "message": "No file part"}), 400
         
         file = request.files['file']
         
         # Check if file is selected
         if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
+            return jsonify({"status": "error", "message": "No selected file"}), 400
         
         # Get optional album_id and section_id
         album_id = request.form.get('album_id')
@@ -383,20 +384,20 @@ def upload_image():
         
         # Validate album_id if provided
         if album_id and not ObjectId.is_valid(album_id):
-            return jsonify({"error": "Invalid album ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid album ID"}), 400
         
         # Validate section_id if provided
         if section_id and not ObjectId.is_valid(section_id):
-            return jsonify({"error": "Invalid section ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid section ID"}), 400
         
         # Check if file is allowed
         if file and current_app.allowed_file(file.filename):
             return process_single_image(file, album_id, section_id)
         
-        return jsonify({"error": "Invalid file type"}), 400
+        return jsonify({"status": "error", "message": "Invalid file type"}), 400
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @images_bp.route('/upload-multiple', methods=['POST'])
 def upload_multiple_images():
@@ -406,12 +407,12 @@ def upload_multiple_images():
         
         # Check if files are present
         if 'files' not in request.files:
-            return jsonify({"error": "No files part"}), 400
+            return jsonify({"status": "error", "message": "No files part"}), 400
         
         files = request.files.getlist('files')
         
         if not files or all(f.filename == '' for f in files):
-            return jsonify({"error": "No files selected"}), 400
+            return jsonify({"status": "error", "message": "No files selected"}), 400
         
         # Get optional album_id and section_id
         album_id = request.form.get('album_id')
@@ -419,11 +420,11 @@ def upload_multiple_images():
         
         # Validate album_id if provided
         if album_id and not ObjectId.is_valid(album_id):
-            return jsonify({"error": "Invalid album ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid album ID"}), 400
         
         # Validate section_id if provided
         if section_id and not ObjectId.is_valid(section_id):
-            return jsonify({"error": "Invalid section ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid section ID"}), 400
         
         results = []
         total_faces = 0
@@ -452,6 +453,7 @@ def upload_multiple_images():
                 errors.append(f"{file.filename}: Invalid file type")
         
         return jsonify({
+            "status": "success",
             "message": f"Multiple upload completed",
             "successful_uploads": successful_uploads,
             "total_files": len(files),
@@ -461,7 +463,7 @@ def upload_multiple_images():
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @images_bp.route('/<image_id>', methods=['GET'])
 def get_image_details(image_id):
@@ -478,12 +480,12 @@ def get_image_details(image_id):
         try:
             image_obj_id = ObjectId(image_id)
         except InvalidId:
-            return jsonify({"error": "Invalid image ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid image ID"}), 400
         
         # Get image document
         image = images_col.find_one({"_id": image_obj_id})
         if not image:
-            return jsonify({"error": "Image not found"}), 404
+            return jsonify({"status": "error", "message": "Image not found"}), 404
         
         # Get all faces in this image
         faces = list(faces_col.find({"image_id": image_obj_id}))
@@ -509,6 +511,7 @@ def get_image_details(image_id):
             image_faces.append(face_data)
         
         return jsonify({
+            "status": "success",
             "image_id": str(image["_id"]),
             "filename": image["filename"],
             "mime_type": image.get("mime_type", "image/jpeg"),
@@ -517,7 +520,7 @@ def get_image_details(image_id):
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @images_bp.route('/<image_id>/file')
 def serve_image_file(image_id):
@@ -532,14 +535,14 @@ def serve_image_file(image_id):
         # Find image by ID
         image = images_col.find_one({"_id": ObjectId(image_id)})
         if not image:
-            return jsonify({"error": "Image not found"}), 404
+            return jsonify({"status": "error", "message": "Image not found"}), 404
         
         # Get base64 data and mime type
         base64_data = image.get("original_image_base64")
         mime_type = image.get("mime_type", "image/jpeg")
         
         if not base64_data:
-            return jsonify({"error": "Image data not found"}), 404
+            return jsonify({"status": "error", "message": "Image data not found"}), 404
         
         # Decode base64 data
         image_data = base64.b64decode(base64_data)
@@ -548,7 +551,7 @@ def serve_image_file(image_id):
         return Response(image_data, mimetype=mime_type)
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @images_bp.route('/search-by-image', methods=['POST'])
 def search_by_image():
@@ -569,17 +572,17 @@ def search_by_image():
         
         # Check if file is present
         if 'file' not in request.files:
-            return jsonify({"error": "No file part"}), 400
+            return jsonify({"status": "error", "message": "No file part"}), 400
         
         file = request.files['file']
         
         # Check if file is selected
         if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
+            return jsonify({"status": "error", "message": "No selected file"}), 400
         
         # Check if file is allowed
         if not (file and current_app.allowed_file(file.filename)):
-            return jsonify({"error": "Invalid file type"}), 400
+            return jsonify({"status": "error", "message": "Invalid file type"}), 400
         
         # Save temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
@@ -697,4 +700,73 @@ def search_by_image():
                 os.unlink(temp_path)
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@images_bp.route('/<image_id>', methods=['DELETE'])
+def delete_image(image_id):
+    """Delete an image and all associated faces"""
+    try:
+        from flask import current_app
+        
+        db = current_app.db
+        images_col = db.images
+        faces_col = db.faces
+        persons_col = db.persons
+        
+        # Validate image ObjectId
+        try:
+            image_obj_id = ObjectId(image_id)
+        except InvalidId:
+            return jsonify({"status": "error", "message": "Invalid image ID"}), 400
+        
+        # Check if image exists
+        image = images_col.find_one({"_id": image_obj_id})
+        if not image:
+            return jsonify({"status": "error", "message": "Image not found"}), 404
+        
+        # Get all faces associated with this image
+        faces = list(faces_col.find({"image_id": image_obj_id}))
+        
+        # Track deleted persons
+        deleted_persons = []
+        
+        # For each face, check if we need to delete the person
+        for face in faces:
+            person_id = face.get("person_id")
+            if person_id:
+                # Count how many faces this person has
+                person_faces_count = faces_col.count_documents({"person_id": person_id})
+                
+                # If this person only has 1 face (the one we're about to delete), delete the person
+                if person_faces_count == 1:
+                    person = persons_col.find_one({"_id": person_id})
+                    if person:
+                        deleted_persons.append(person["name"])
+                        persons_col.delete_one({"_id": person_id})
+                        print(f"Deleted empty person: {person['name']}")
+                else:
+                    # Remove this face from the person's face list
+                    persons_col.update_one(
+                        {"_id": person_id},
+                        {
+                            "$pull": {"faces": face["_id"], "images": image_obj_id},
+                            "$set": {"updated_at": datetime.datetime.utcnow().isoformat()}
+                        }
+                    )
+        
+        # Delete all faces associated with this image
+        deleted_faces_count = faces_col.delete_many({"image_id": image_obj_id}).deleted_count
+        
+        # Delete the image
+        images_col.delete_one({"_id": image_obj_id})
+        
+        return jsonify({
+            "status": "success",
+            "message": "Image deleted successfully",
+            "image_id": str(image_obj_id),
+            "deleted_faces_count": deleted_faces_count,
+            "deleted_persons": deleted_persons
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500

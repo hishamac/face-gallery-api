@@ -83,7 +83,7 @@ app.register_blueprint(stats_bp, url_prefix='/stats')
 def index():
     return jsonify({
         "message": "Face Clustering API",
-        "version": "3.0",
+        "lastUpdated": "27-09-2025",
         "endpoints": {
             "images": "/images",
             "albums": "/albums", 

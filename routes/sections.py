@@ -53,12 +53,14 @@ def get_all_sections():
         section_list.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         
         return jsonify({
+            "status": "success",
+            "message": f"Retrieved {len(section_list)} sections",
             "sections": section_list,
             "total": len(section_list)
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @sections_bp.route('/', methods=['POST'])
 def create_section():
@@ -71,16 +73,16 @@ def create_section():
         
         data = request.get_json()
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({"status": "error", "message": "No data provided"}), 400
         
         name = data.get("name", "").strip()
         if not name:
-            return jsonify({"error": "Section name is required"}), 400
+            return jsonify({"status": "error", "message": "Section name is required"}), 400
         
         # Check if section with same name exists
         existing = sections_col.find_one({"name": name})
         if existing:
-            return jsonify({"error": "Section with this name already exists"}), 400
+            return jsonify({"status": "error", "message": "Section with this name already exists"}), 400
         
         section_doc = {
             "name": name,
@@ -94,12 +96,13 @@ def create_section():
         section_doc.pop("_id", None)
         
         return jsonify({
+            "status": "success",
             "message": "Section created successfully",
             "section": section_doc
         }), 201
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @sections_bp.route('/<section_id>', methods=['GET'])
 def get_section(section_id):
@@ -112,11 +115,11 @@ def get_section(section_id):
         images_col = db.images
         
         if not ObjectId.is_valid(section_id):
-            return jsonify({"error": "Invalid section ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid section ID"}), 400
         
         section = sections_col.find_one({"_id": ObjectId(section_id)})
         if not section:
-            return jsonify({"error": "Section not found"}), 404
+            return jsonify({"status": "error", "message": "Section not found"}), 404
         
         # Count images in this section
         image_count = images_col.count_documents({"section_id": section_id})
@@ -130,10 +133,10 @@ def get_section(section_id):
             "image_count": image_count
         }
         
-        return jsonify({"section": section_data})
+        return jsonify({"status": "success", "data": {"section": section_data}})
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @sections_bp.route('/<section_id>', methods=['PUT'])
 def update_section(section_id):
@@ -145,15 +148,15 @@ def update_section(section_id):
         sections_col = db.sections
         
         if not ObjectId.is_valid(section_id):
-            return jsonify({"error": "Invalid section ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid section ID"}), 400
             
         data = request.get_json()
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return jsonify({"status": "error", "message": "No data provided"}), 400
         
         name = data.get("name", "").strip()
         if not name:
-            return jsonify({"error": "Section name is required"}), 400
+            return jsonify({"status": "error", "message": "Section name is required"}), 400
         
         # Check if another section with same name exists
         existing = sections_col.find_one({
@@ -161,7 +164,7 @@ def update_section(section_id):
             "_id": {"$ne": ObjectId(section_id)}
         })
         if existing:
-            return jsonify({"error": "Section with this name already exists"}), 400
+            return jsonify({"status": "error", "message": "Section with this name already exists"}), 400
         
         update_data = {
             "name": name,
@@ -175,12 +178,12 @@ def update_section(section_id):
         )
         
         if result.matched_count == 0:
-            return jsonify({"error": "Section not found"}), 404
+            return jsonify({"status": "error", "message": "Section not found"}), 404
         
-        return jsonify({"message": "Section updated successfully"})
+        return jsonify({"status": "success", "message": "Section updated successfully"})
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @sections_bp.route('/<section_id>', methods=['DELETE'])
 def delete_section(section_id):
@@ -193,12 +196,12 @@ def delete_section(section_id):
         images_col = db.images
         
         if not ObjectId.is_valid(section_id):
-            return jsonify({"error": "Invalid section ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid section ID"}), 400
         
         # Check if section exists
         section = sections_col.find_one({"_id": ObjectId(section_id)})
         if not section:
-            return jsonify({"error": "Section not found"}), 404
+            return jsonify({"status": "error", "message": "Section not found"}), 404
         
         # Remove section_id from all images in this section
         images_col.update_many(
@@ -210,12 +213,13 @@ def delete_section(section_id):
         result = sections_col.delete_one({"_id": ObjectId(section_id)})
         
         if result.deleted_count == 0:
-            return jsonify({"error": "Failed to delete section"}), 500
+            return jsonify({"status": "error", "message": "Failed to delete section"}), 500
         
         return jsonify({
+            "status": "success",
             "message": "Section deleted successfully",
             "section_name": section.get("name", "Unknown")
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500

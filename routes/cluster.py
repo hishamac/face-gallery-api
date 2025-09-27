@@ -31,7 +31,10 @@ def preview_clustering():
         faces = list(faces_col.find())
         
         if not faces:
-            return jsonify({"message": "No faces to preview"})
+            return jsonify({
+                "status": "success",
+                "message": "No faces to preview"
+            })
         
         # Extract embeddings
         embeddings = [np.array(face["embedding"]) for face in faces]
@@ -46,6 +49,8 @@ def preview_clustering():
             cluster_stats[int(label)] = sum(1 for l in clustering.labels_ if int(l) == label)
         
         return jsonify({
+            "status": "success",
+            "message": "Clustering preview completed successfully",
             "preview_results": {
                 "total_faces": len(faces),
                 "unique_clusters": len(unique_labels) - (1 if -1 in unique_labels else 0),
@@ -56,7 +61,7 @@ def preview_clustering():
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @cluster_bp.route('/', methods=['GET'])
 def cluster_faces():
@@ -91,6 +96,7 @@ def cluster_faces():
         
         if not faces:
             return jsonify({
+                "status": "success",
                 "message": "No faces to cluster (all faces are manually assigned)",
                 "manually_assigned_faces": manually_assigned_count
             })
@@ -107,7 +113,10 @@ def cluster_faces():
                 face_ids.append(face["_id"])
         
         if len(embeddings) < 2:
-            return jsonify({"message": "Need at least 2 faces for clustering"})
+            return jsonify({
+                "status": "success",
+                "message": "Need at least 2 faces for clustering"
+            })
         
         # Use the same face_recognition logic as upload (not DBSCAN)
         print("Re-clustering using face_recognition.compare_faces (same as upload)")
@@ -261,6 +270,7 @@ def cluster_faces():
         total_faces_assigned = faces_col.count_documents({"person_id": {"$exists": True}})
         
         return jsonify({
+            "status": "success",
             "message": "Clustering completed (preserving manual assignments and person names)",
             "total_faces": len(faces),
             "total_faces_assigned": total_faces_assigned,
@@ -276,4 +286,4 @@ def cluster_faces():
         
     except Exception as e:
         print(f"Clustering error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500

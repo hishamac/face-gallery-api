@@ -27,20 +27,24 @@ def get_stats():
         manual_assignments = faces_col.count_documents({"is_manual_assignment": True})
         
         return jsonify({
-            "total_persons": total_persons,
-            "total_images": total_images,
-            "total_faces": total_faces,
-            "total_albums": total_albums,
-            "total_sections": total_sections,
-            "images_with_faces": images_with_faces,
-            "images_without_faces": images_without_faces,
-            "manual_face_assignments": manual_assignments,
-            "gallery_stats": {
-                "face_coverage": round((images_with_faces / total_images * 100) if total_images > 0 else 0, 1),
-                "avg_faces_per_image": round((total_faces / images_with_faces) if images_with_faces > 0 else 0, 1),
-                "avg_faces_per_person": round((total_faces / total_persons) if total_persons > 0 else 0, 1)
-            }
+            "status": "success",
+            "data": {
+                "total_persons": total_persons,
+                "total_images": total_images,
+                "total_faces": total_faces,
+                "total_albums": total_albums,
+                "total_sections": total_sections,
+                "images_with_faces": images_with_faces,
+                "images_without_faces": images_without_faces,
+                "manual_face_assignments": manual_assignments,
+                "gallery_stats": {
+                    "face_coverage": round((images_with_faces / total_images * 100) if total_images > 0 else 0, 1),
+                    "avg_faces_per_image": round((total_faces / images_with_faces) if images_with_faces > 0 else 0, 1),
+                    "avg_faces_per_person": round((total_faces / total_persons) if total_persons > 0 else 0, 1)
+                }
+            },
+            "message": "Statistics retrieved successfully"
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500

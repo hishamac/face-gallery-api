@@ -57,12 +57,14 @@ def get_all_persons():
         person_list.sort(key=lambda x: x["person_name"])
         
         return jsonify({
+            "status": "success",
+            "message": f"Retrieved {len(person_list)} persons",
             "persons": person_list,
             "total": len(person_list)
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @persons_bp.route('/<person_id>', methods=['GET'])
 def get_person_details(person_id):
@@ -79,12 +81,12 @@ def get_person_details(person_id):
         try:
             person_obj_id = ObjectId(person_id)
         except InvalidId:
-            return jsonify({"error": "Invalid person ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid person ID"}), 400
         
         # Get person document
         person = persons_col.find_one({"_id": person_obj_id})
         if not person:
-            return jsonify({"error": "Person not found"}), 404
+            return jsonify({"status": "error", "message": "Person not found"}), 404
         
         # Get all faces for this person
         faces = list(faces_col.find({"person_id": person_obj_id}))
@@ -115,6 +117,8 @@ def get_person_details(person_id):
             person_images.append(image_data)
         
         return jsonify({
+            "status": "success",
+            "message": f"Person details retrieved successfully",
             "person_id": str(person["_id"]),
             "person_name": person["name"],
             "total_faces": len(person_faces),
@@ -124,7 +128,7 @@ def get_person_details(person_id):
         })
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @persons_bp.route('/<person_id>/rename', methods=['PUT'])
 def rename_person(person_id):
@@ -139,21 +143,21 @@ def rename_person(person_id):
         try:
             person_obj_id = ObjectId(person_id)
         except InvalidId:
-            return jsonify({"error": "Invalid person ID"}), 400
+            return jsonify({"status": "error", "message": "Invalid person ID"}), 400
         
         # Get new name from request
         data = request.get_json()
         if not data or 'name' not in data:
-            return jsonify({"error": "Name is required"}), 400
+            return jsonify({"status": "error", "message": "Name is required"}), 400
         
         new_name = data['name'].strip()
         if not new_name:
-            return jsonify({"error": "Name cannot be empty"}), 400
+            return jsonify({"status": "error", "message": "Name cannot be empty"}), 400
         
         # Check if person exists
         person = persons_col.find_one({"_id": person_obj_id})
         if not person:
-            return jsonify({"error": "Person not found"}), 404
+            return jsonify({"status": "error", "message": "Person not found"}), 404
         
         # Update person name
         result = persons_col.update_one(
@@ -163,13 +167,14 @@ def rename_person(person_id):
         
         if result.modified_count > 0:
             return jsonify({
+                "status": "success",
                 "message": "Person renamed successfully",
                 "person_id": str(person_obj_id),
                 "old_name": person["name"],
                 "new_name": new_name
             })
         else:
-            return jsonify({"error": "Failed to update person name"}), 500
+            return jsonify({"status": "error", "message": "Failed to update person name"}), 500
             
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
