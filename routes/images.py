@@ -518,6 +518,8 @@ def get_image_details(image_id):
             "filename": image["filename"],
             "mime_type": image.get("mime_type", "image/jpeg"),
             "image_base64": image.get("original_image_base64", ""),  # Add base64 data for main image
+            "upload_date": image.get("created_at", image.get("upload_date", "")),  # Add upload date
+            "has_faces": len(image_faces) > 0,  # Add has_faces flag
             "total_faces": len(image_faces),
             "faces": image_faces
         })
@@ -615,12 +617,13 @@ def search_by_image():
             # Get the single face encoding
             search_encoding = face_encodings[0]
             
-            # Get all faces from database
+            # Get all faces from database (same as clustering)
             all_faces = list(faces_col.find({}, {
                 "embedding": 1, 
                 "person_id": 1, 
                 "image_id": 1, 
                 "cropped_face_filename": 1,
+                "cropped_face_base64": 1,
                 "_id": 1
             }))
             
@@ -630,7 +633,10 @@ def search_by_image():
                     "matches": []
                 })
             
-            # Compare against all faces
+            # Use the same face_recognition logic as clustering for consistency
+            print(f"Searching against {len(all_faces)} faces using face_recognition.compare_faces")
+            
+            # Compare against all faces using the same tolerance as clustering
             known_encodings = []
             face_data = []
             
@@ -639,15 +645,17 @@ def search_by_image():
                     known_encodings.append(np.array(face["embedding"]))
                     face_data.append(face)
             
-            # Find matches with configurable tolerance
-            search_tolerance = float(request.form.get('tolerance', app_config.FACE_RECOGNITION_TOLERANCE))
+            # Use the same tolerance as clustering for consistent results
+            search_tolerance = app_config.FACE_RECOGNITION_TOLERANCE
+            print(f"Using clustering tolerance: {search_tolerance}")
+            
             matches = face_recognition.compare_faces(
                 known_encodings, 
                 search_encoding, 
                 tolerance=search_tolerance
             )
             
-            # Get distances for ranking
+            # Get distances for ranking (more accurate than just boolean matches)
             distances = face_recognition.face_distance(known_encodings, search_encoding)
             
             # Collect matches with their confidence scores
@@ -674,24 +682,28 @@ def search_by_image():
                         } if person else None,
                         "image": {
                             "image_id": str(image["_id"]) if image else None,
-                            "filename": image.get("filename", "") if image else ""
+                            "filename": image.get("filename", "") if image else "",
+                            "mime_type": image.get("mime_type", "image/jpeg") if image else "image/jpeg",
+                            "image_base64": image.get("original_image_base64", "") if image else ""
                         } if image else None,
-                        "cropped_face_filename": face.get("cropped_face_filename")
+                        "cropped_face_filename": face.get("cropped_face_filename"),
+                        "face_base64": face.get("cropped_face_base64", "")  # Add face base64 data
                     }
                     match_results.append(match_result)
             
-            # Sort by confidence (highest first)
-            match_results.sort(key=lambda x: x["confidence"], reverse=True)
+            # Sort by distance (lower distance = better match)
+            match_results.sort(key=lambda x: x["distance"])
             
-            # Limit results
-            max_results = int(request.form.get('max_results', 20))
+            # Limit results to top 10 matches for better quality
+            max_results = 10  # Increased from 5 for better coverage with clustering tolerance
             match_results = match_results[:max_results]
             
             return jsonify({
-                "message": f"Found {len(match_results)} matching faces",
+                "message": f"Found {len(match_results)} matching faces using clustering logic",
                 "search_params": {
                     "tolerance": search_tolerance,
-                    "max_results": max_results
+                    "max_results": max_results,
+                    "method": "face_recognition.compare_faces (same as clustering)"
                 },
                 "matches": match_results,
                 "total_faces_searched": len(known_encodings)
@@ -704,6 +716,382 @@ def search_by_image():
         
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@images_bp.route('/<image_id>/redetect-faces', methods=['POST'])
+def redetect_faces(image_id):
+    """Re-detect faces in an existing image with enhanced processing"""
+    try:
+        from flask import current_app
+        from config import config
+        import os
+        import cv2
+        from PIL import Image, ImageEnhance
+        import numpy as np
+        import base64
+        from io import BytesIO
+        
+        # Get configuration
+        env = os.getenv('FLASK_ENV', 'development')
+        app_config = config.get(env, config['default'])
+        
+        db = current_app.db
+        images_col = db.images
+        faces_col = db.faces
+        persons_col = db.persons
+        
+        # Convert string ID to ObjectId
+        try:
+            from bson import ObjectId
+            image_obj_id = ObjectId(image_id)
+        except:
+            return jsonify({"status": "error", "message": "Invalid image ID format"}), 400
+        
+        # Find the image
+        image_doc = images_col.find_one({"_id": image_obj_id})
+        if not image_doc:
+            return jsonify({"status": "error", "message": "Image not found"}), 404
+        
+        # Get the original image data
+        if not image_doc.get("original_image_base64"):
+            return jsonify({"status": "error", "message": "Original image data not found"}), 404
+        
+        print(f"Re-detecting faces for image: {image_doc.get('filename', 'Unknown')}")
+        
+        # Decode base64 image
+        image_data_b64 = image_doc["original_image_base64"]
+        image_bytes = base64.b64decode(image_data_b64)
+        
+        # Save to temporary file for processing
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = temp_file.name
+        
+        try:
+            # Load image with optimized detection methods
+            original_image = face_recognition.load_image_file(temp_path)
+            
+            # Try optimized detection methods in order of speed vs accuracy
+            detection_methods = []
+            all_locations = []
+            all_encodings = []
+            
+            print("Starting optimized face re-detection...")
+            
+            # Method 1: Fast HOG detection (fastest)
+            print("Trying HOG detection...")
+            locations_hog = face_recognition.face_locations(original_image, model="hog", number_of_times_to_upsample=0)
+            encodings_hog = face_recognition.face_encodings(original_image, locations_hog)
+            
+            detection_methods.append({
+                "method": "hog_fast",
+                "locations": locations_hog,
+                "encodings": encodings_hog
+            })
+            
+            # If HOG found faces, use them and skip other methods for speed
+            if len(locations_hog) > 0:
+                print(f"HOG found {len(locations_hog)} faces - using these results")
+                all_locations = locations_hog
+                all_encodings = encodings_hog
+            else:
+                print("HOG found no faces, trying enhanced detection...")
+                
+                # Method 2: Enhanced image with HOG (faster than CNN)
+                try:
+                    pil_image = Image.open(temp_path)
+                    
+                    # Quick brightness/contrast enhancement
+                    brightness_enhancer = ImageEnhance.Brightness(pil_image)
+                    enhanced_image = brightness_enhancer.enhance(1.3)  # More aggressive
+                    
+                    contrast_enhancer = ImageEnhance.Contrast(enhanced_image)
+                    final_enhanced = contrast_enhancer.enhance(1.4)  # More aggressive
+                    
+                    # Save enhanced image temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as enhanced_temp:
+                        final_enhanced.save(enhanced_temp.name, 'JPEG', quality=90)
+                        enhanced_temp_path = enhanced_temp.name
+                    
+                    try:
+                        enhanced_img_data = face_recognition.load_image_file(enhanced_temp_path)
+                        locations_enhanced = face_recognition.face_locations(enhanced_img_data, model="hog", number_of_times_to_upsample=1)
+                        encodings_enhanced = face_recognition.face_encodings(enhanced_img_data, locations_enhanced)
+                        
+                        detection_methods.append({
+                            "method": "enhanced_hog",
+                            "locations": locations_enhanced,
+                            "encodings": encodings_enhanced
+                        })
+                        
+                        if len(locations_enhanced) > 0:
+                            print(f"Enhanced HOG found {len(locations_enhanced)} faces")
+                            all_locations = locations_enhanced
+                            all_encodings = encodings_enhanced
+                        else:
+                            # Method 3: CNN as last resort (slowest but most accurate)
+                            print("Enhanced HOG found no faces, trying CNN...")
+                            locations_cnn = face_recognition.face_locations(original_image, model="cnn", number_of_times_to_upsample=0)
+                            encodings_cnn = face_recognition.face_encodings(original_image, locations_cnn)
+                            
+                            detection_methods.append({
+                                "method": "cnn_fallback",
+                                "locations": locations_cnn,
+                                "encodings": encodings_cnn
+                            })
+                            
+                            all_locations = locations_cnn
+                            all_encodings = encodings_cnn
+                            print(f"CNN found {len(locations_cnn)} faces")
+                            
+                    finally:
+                        if os.path.exists(enhanced_temp_path):
+                            os.unlink(enhanced_temp_path)
+                            
+                except Exception as e:
+                    print(f"Enhanced detection failed: {e}")
+                    # Fallback to CNN on original image
+                    locations_cnn = face_recognition.face_locations(original_image, model="cnn", number_of_times_to_upsample=0)
+                    encodings_cnn = face_recognition.face_encodings(original_image, locations_cnn)
+                    all_locations = locations_cnn
+                    all_encodings = encodings_cnn
+            
+            # Create detection summary
+            detection_summary = []
+            for method in detection_methods:
+                detection_summary.append({
+                    "method": method["method"],
+                    "faces_found": len(method["locations"])
+                })
+            
+            print(f"Total faces found: {len(all_locations)}")
+            
+            if len(all_locations) == 0:
+                return jsonify({
+                    "status": "success",
+                    "message": "No faces detected even with enhanced processing",
+                    "faces_detected": 0,
+                    "detection_methods": detection_summary,
+                    "image_id": image_id
+                })
+            
+            # Delete existing faces for this image
+            existing_faces = list(faces_col.find({"image_id": image_obj_id}))
+            if existing_faces:
+                print(f"Removing {len(existing_faces)} existing faces")
+                # Remove faces from persons
+                for face in existing_faces:
+                    if face.get("person_id"):
+                        persons_col.update_one(
+                            {"_id": face["person_id"]},
+                            {"$pull": {"faces": face["_id"], "images": image_obj_id}}
+                        )
+                
+                # Delete existing faces
+                faces_col.delete_many({"image_id": image_obj_id})
+            
+            # Process new faces (similar to upload logic)
+            processed_faces = process_image_faces(
+                original_image, all_locations, all_encodings, image_obj_id,
+                image_doc, faces_col, persons_col, app_config
+            )
+            
+            # Update image document
+            images_col.update_one(
+                {"_id": image_obj_id},
+                {
+                    "$set": {
+                        "faces_detected": len(processed_faces),
+                        "has_faces": len(processed_faces) > 0,
+                        "last_face_detection": datetime.datetime.utcnow().isoformat(),
+                        "detection_methods_used": detection_summary
+                    }
+                }
+            )
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Successfully re-detected {len(processed_faces)} faces using enhanced processing",
+                "faces_detected": len(processed_faces),
+                "previous_faces": len(existing_faces),
+                "detection_methods": detection_summary,
+                "image_id": image_id,
+                "faces": [
+                    {
+                        "face_id": str(face["_id"]),
+                        "person_id": str(face.get("person_id", "")) if face.get("person_id") else None,
+                        "person_name": face.get("person_name", "Unknown"),
+                        "confidence": face.get("confidence", 0)
+                    }
+                    for face in processed_faces
+                ]
+            })
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        
+    except Exception as e:
+        print(f"Face re-detection error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def calculate_face_overlap(face1, face2):
+    """Calculate overlap percentage between two face locations"""
+    # face format: (top, right, bottom, left)
+    top1, right1, bottom1, left1 = face1
+    top2, right2, bottom2, left2 = face2
+    
+    # Calculate intersection
+    left = max(left1, left2)
+    top = max(top1, top2)
+    right = min(right1, right2)
+    bottom = min(bottom1, bottom2)
+    
+    if left < right and top < bottom:
+        intersection = (right - left) * (bottom - top)
+        area1 = (right1 - left1) * (bottom1 - top1)
+        area2 = (right2 - left2) * (bottom2 - top2)
+        union = area1 + area2 - intersection
+        return intersection / union if union > 0 else 0
+    
+    return 0
+
+
+def process_image_faces(image_data, face_locations, face_encodings, image_id, image_doc, faces_col, persons_col, app_config):
+    """Process detected faces (optimized version)"""
+    import base64
+    import datetime
+    from PIL import Image
+    from io import BytesIO
+    
+    processed_faces = []
+    
+    # Get all existing faces once for efficiency
+    existing_faces = list(faces_col.find({"embedding": {"$exists": True}}, {
+        "embedding": 1, 
+        "person_id": 1, 
+        "_id": 1
+    }))
+    
+    existing_encodings = []
+    existing_person_ids = []
+    
+    if existing_faces:
+        existing_encodings = [np.array(face["embedding"]) for face in existing_faces]
+        existing_person_ids = [face.get("person_id") for face in existing_faces]
+    
+    print(f"Processing {len(face_encodings)} faces against {len(existing_encodings)} existing faces")
+    
+    for i, (encoding, location) in enumerate(zip(face_encodings, face_locations)):
+        print(f"Processing face {i+1}/{len(face_encodings)}")
+        
+        # Crop face (optimized)
+        top, right, bottom, left = location
+        face_image = image_data[top:bottom, left:right]
+        
+        # Convert to PIL and resize if too large (for speed)
+        pil_image = Image.fromarray(face_image)
+        if pil_image.width > 200 or pil_image.height > 200:
+            pil_image.thumbnail((200, 200), Image.Resampling.LANCZOS)
+        
+        # Convert face to base64
+        buffered = BytesIO()
+        pil_image.save(buffered, format="JPEG", quality=85)  # Reduced quality for speed
+        face_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        # Generate filename
+        face_filename = f"{image_doc.get('filename', 'unknown')}_face_{i}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        
+        # Find matching person (optimized - batch comparison)
+        person_id = None
+        person_name = "Unknown"
+        confidence = 0
+        
+        if existing_encodings:
+            # Use vectorized comparison for speed
+            matches = face_recognition.compare_faces(existing_encodings, encoding, tolerance=app_config.FACE_RECOGNITION_TOLERANCE)
+            
+            if any(matches):
+                match_index = matches.index(True)
+                person_id = existing_person_ids[match_index]
+                
+                if person_id:
+                    # Get person name (cached lookup)
+                    person_doc = persons_col.find_one({"_id": person_id}, {"name": 1})
+                    if person_doc:
+                        person_name = person_doc.get("name", "Unknown")
+                        # Calculate confidence
+                        distances = face_recognition.face_distance([existing_encodings[match_index]], encoding)
+                        confidence = max(0, 1 - (distances[0] / app_config.FACE_RECOGNITION_TOLERANCE))
+        
+        # If no match found, create new person
+        if not person_id:
+            person_count = persons_col.count_documents({}) + 1
+            person_doc = {
+                "name": f"Person {person_count}",
+                "faces": [],
+                "images": [],
+                "created_at": datetime.datetime.utcnow().isoformat()
+            }
+            person_result = persons_col.insert_one(person_doc)
+            person_id = person_result.inserted_id
+            person_name = person_doc["name"]
+            confidence = 1.0  # New person, full confidence
+        
+        # Create face document
+        face_doc = {
+            "image_id": image_id,
+            "person_id": person_id,
+            "person_name": person_name,
+            "confidence": confidence,
+            "embedding": encoding.tolist(),
+            "cropped_face_filename": face_filename,
+            "cropped_face_base64": face_base64,
+            "face_location": {
+                "top": int(top),
+                "right": int(right), 
+                "bottom": int(bottom),
+                "left": int(left)
+            },
+            "created_at": datetime.datetime.utcnow().isoformat(),
+            "detection_method": "redetection_optimized"
+        }
+        
+        # Insert face
+        face_result = faces_col.insert_one(face_doc)
+        face_doc["_id"] = face_result.inserted_id
+        
+        processed_faces.append(face_doc)
+    
+    # Batch update persons (more efficient)
+    if processed_faces:
+        print("Updating person documents...")
+        person_updates = {}
+        for face in processed_faces:
+            person_id = face["person_id"]
+            if person_id not in person_updates:
+                person_updates[person_id] = {
+                    "faces": [],
+                    "images": set()
+                }
+            person_updates[person_id]["faces"].append(face["_id"])
+            person_updates[person_id]["images"].add(image_id)
+        
+        # Apply batch updates
+        for person_id, updates in person_updates.items():
+            persons_col.update_one(
+                {"_id": person_id},
+                {
+                    "$addToSet": {
+                        "faces": {"$each": updates["faces"]},
+                        "images": {"$each": list(updates["images"])}
+                    },
+                    "$set": {"updated_at": datetime.datetime.utcnow().isoformat()}
+                }
+            )
+    
+    return processed_faces
 
 @images_bp.route('/<image_id>', methods=['DELETE'])
 def delete_image(image_id):
