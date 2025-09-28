@@ -39,17 +39,17 @@ def get_all_persons():
         for person in persons:
             # Get the first face for this person as thumbnail
             first_face = faces_col.find_one({"person_id": person["_id"]})
-            thumbnail_face_id = None
+            thumbnail_base64 = None
             
-            if first_face:
-                thumbnail_face_id = str(first_face["_id"])
+            if first_face and first_face.get("cropped_face_base64"):
+                thumbnail_base64 = first_face.get("cropped_face_base64")
             
             person_data = {
                 "person_id": str(person["_id"]),
                 "person_name": person.get("name", "Unknown"),
                 "total_faces": len(person.get("faces", [])),
                 "total_images": len(person.get("images", [])),
-                "thumbnail": thumbnail_face_id  # face ID for thumbnail
+                "thumbnail": thumbnail_base64  # base64 data for thumbnail instead of face ID
             }
             person_list.append(person_data)
         
@@ -104,7 +104,8 @@ def get_person_details(person_id):
                 "face_id": str(face["_id"]),
                 "image_id": str(face["image_id"]),
                 "cropped_face_filename": face.get("cropped_face_filename"),
-                "face_location": face.get("face_location", {})
+                "face_location": face.get("face_location", {}),
+                "face_base64": face.get("cropped_face_base64", "")  # Add base64 data for face
             }
             person_faces.append(face_data)
         
@@ -112,7 +113,8 @@ def get_person_details(person_id):
             image_data = {
                 "image_id": str(image["_id"]),
                 "filename": image["filename"],
-                "mime_type": image.get("mime_type", "image/jpeg")
+                "mime_type": image.get("mime_type", "image/jpeg"),
+                "image_base64": image.get("original_image_base64", "")  # Add base64 data for image
             }
             person_images.append(image_data)
         

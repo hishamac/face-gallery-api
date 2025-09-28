@@ -338,6 +338,7 @@ def get_all_images():
                 "image_id": str(image["_id"]),
                 "filename": image.get("filename", ""),
                 "mime_type": image.get("mime_type", "image/jpeg"),
+                "image_base64": image.get("original_image_base64", ""),  # Add base64 data
                 "faces_count": len(image_faces),
                 "persons_count": len(persons_in_image),
                 "persons": persons_in_image,
@@ -506,6 +507,7 @@ def get_image_details(image_id):
                 "face_id": str(face["_id"]),
                 "cropped_face_filename": face.get("cropped_face_filename"),
                 "face_location": face.get("face_location", {}),
+                "face_base64": face.get("cropped_face_base64", ""),  # Add base64 data for face
                 "person": person_info
             }
             image_faces.append(face_data)
@@ -515,6 +517,7 @@ def get_image_details(image_id):
             "image_id": str(image["_id"]),
             "filename": image["filename"],
             "mime_type": image.get("mime_type", "image/jpeg"),
+            "image_base64": image.get("original_image_base64", ""),  # Add base64 data for main image
             "total_faces": len(image_faces),
             "faces": image_faces
         })
