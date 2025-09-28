@@ -316,17 +316,197 @@ echo "📦 Installing Certbot..."
 sudo apt-get update
 sudo apt-get install -y certbot python3-certbot-nginx
 
-echo "🔒 Obtaining SSL certificate for \$DOMAIN..."
+echo "� Updating Nginx configuration for domain \$DOMAIN..."
+# Create domain-specific nginx configuration
+sudo tee /etc/nginx/sites-available/face-api > /dev/null << NGINX_EOF
+# HTTP server - redirect to HTTPS
+server {
+    listen 80;
+    server_name \$DOMAIN;
+    return 301 https://\\\$server_name\\\$request_uri;
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name \$DOMAIN;
+    
+    # SSL Configuration (will be updated by certbot)
+    ssl_certificate /etc/nginx/ssl/face-api.crt;
+    ssl_certificate_key /etc/nginx/ssl/face-api.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # Increase client max body size for image uploads
+    client_max_body_size 50M;
+    
+    # Security headers
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+    
+    # API endpoints
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        
+        # Increase timeout for face processing
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Flask handles CORS headers
+    }
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\\n";
+        add_header Content-Type text/plain;
+    }
+}
+NGINX_EOF
+
+echo "🔄 Testing and reloading Nginx..."
+sudo nginx -t && sudo systemctl reload nginx
+
+echo "�🔒 Obtaining SSL certificate for \$DOMAIN..."
 sudo certbot --nginx -d \$DOMAIN --non-interactive --agree-tos --email admin@\$DOMAIN
 
 echo "⚙️ Setting up auto-renewal..."
 echo "0 12 * * * /usr/bin/certbot renew --quiet" | sudo crontab -
 
+echo "🧪 Testing HTTPS connection..."
+if curl -s -k https://\$DOMAIN/health > /dev/null; then
+    echo "✅ HTTPS connection successful!"
+else
+    echo "⚠️  HTTPS connection test failed - check service status"
+fi
+
 echo "✅ Let's Encrypt SSL setup completed!"
 echo "Your API is now available at: https://\$DOMAIN"
+echo
+echo "🔍 Next steps:"
+echo "   1. Test: curl https://\$DOMAIN/health"
+echo "   2. Update your client CORS_ORIGINS to: https://\$DOMAIN"
+echo "   3. Certificate will auto-renew every 12 hours"
 EOF
 
 sudo chmod +x /opt/face-api/setup-letsencrypt.sh
+
+# Create manual certificate installation script
+sudo tee /opt/face-api/install-existing-cert.sh > /dev/null << EOF
+#!/bin/bash
+echo "🔧 Installing existing Let's Encrypt certificate..."
+echo "================================================"
+
+# Check if domain is provided
+if [ -z "\$1" ]; then
+    echo "❌ Please provide your domain name"
+    echo "Usage: sudo /opt/face-api/install-existing-cert.sh your-domain.com"
+    exit 1
+fi
+
+DOMAIN=\$1
+
+# Check if certificate exists
+if [ ! -f "/etc/letsencrypt/live/\$DOMAIN/fullchain.pem" ]; then
+    echo "❌ Certificate for \$DOMAIN not found"
+    echo "Run: sudo /opt/face-api/setup-letsencrypt.sh \$DOMAIN"
+    exit 1
+fi
+
+echo "🔧 Updating Nginx configuration for \$DOMAIN..."
+# Update nginx configuration with proper domain name and Let's Encrypt certificates
+sudo tee /etc/nginx/sites-available/face-api > /dev/null << NGINX_EOF
+# HTTP server - redirect to HTTPS
+server {
+    listen 80;
+    server_name \$DOMAIN;
+    return 301 https://\\\$server_name\\\$request_uri;
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name \$DOMAIN;
+    
+    # Let's Encrypt SSL Configuration
+    ssl_certificate /etc/letsencrypt/live/\$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/\$DOMAIN/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # Increase client max body size for image uploads
+    client_max_body_size 50M;
+    
+    # Security headers
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+    
+    # API endpoints
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        
+        # Increase timeout for face processing
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Flask handles CORS headers
+    }
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\\n";
+        add_header Content-Type text/plain;
+    }
+}
+NGINX_EOF
+
+echo "🔄 Testing and reloading Nginx..."
+if sudo nginx -t; then
+    sudo systemctl reload nginx
+    echo "✅ Nginx configuration updated successfully!"
+else
+    echo "❌ Nginx configuration test failed"
+    exit 1
+fi
+
+echo "🧪 Testing HTTPS connection..."
+if curl -s https://\$DOMAIN/health > /dev/null; then
+    echo "✅ HTTPS connection successful!"
+    echo "🎉 Your API is now available at: https://\$DOMAIN"
+else
+    echo "⚠️  HTTPS connection test failed - check service status"
+fi
+
+echo
+echo "✅ Certificate installation completed!"
+echo "🔍 Next steps:"
+echo "   1. Test: curl https://\$DOMAIN/health"
+echo "   2. Update your client CORS_ORIGINS to: https://\$DOMAIN"
+echo "   3. Certificate will auto-renew (cron job already set up)"
+EOF
+
+sudo chmod +x /opt/face-api/install-existing-cert.sh
 
 # Create IP-to-HTTPS access script
 sudo tee /opt/face-api/get-https-access.sh > /dev/null << EOF
@@ -390,6 +570,7 @@ alias nginx-test='sudo nginx -t'
 alias nginx-reload='sudo systemctl reload nginx'
 alias https-info='sudo /opt/face-api/get-https-access.sh'
 alias setup-ssl='sudo /opt/face-api/setup-letsencrypt.sh'
+alias install-cert='sudo /opt/face-api/install-existing-cert.sh'
 EOF
     sudo chown $USER_NAME:$USER_NAME "$USER_HOME/.bash_aliases"
     echo "✅ Aliases created in $USER_HOME/.bash_aliases"
@@ -433,14 +614,15 @@ echo "   curl -k https://localhost/"
 echo "   curl -k https://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google' 2>/dev/null)/"
 echo
 echo "📋 Useful commands:"
-echo "   face-status    - Check API status"
-echo "   face-logs      - View live logs"
-echo "   face-restart   - Restart API"
-echo "   face-update    - Update from GitHub"
-echo "   face-monitor   - System monitoring"
-echo "   face-validate  - Validate setup (includes configuration check)"
-echo "   https-info     - Get HTTPS access URLs"
-echo "   setup-ssl      - Setup Let's Encrypt (requires domain)"
+echo "   face-status      - Check API status"
+echo "   face-logs        - View live logs"
+echo "   face-restart     - Restart API"
+echo "   face-update      - Update from GitHub"
+echo "   face-monitor     - System monitoring"
+echo "   face-validate    - Validate setup (includes configuration check)"
+echo "   https-info       - Get HTTPS access URLs"
+echo "   setup-ssl        - Setup Let's Encrypt (requires domain)"
+echo "   install-cert     - Install existing Let's Encrypt certificate"
 echo
 echo "📁 Important paths:"
 echo "   API Code: /opt/face-api/"
