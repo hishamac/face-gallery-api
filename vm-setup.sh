@@ -601,8 +601,8 @@ echo
 echo "⚠️  IMPORTANT: Complete these steps manually:"
 echo
 echo "1. Create your environment file:"
-echo "   sudo cp /opt/face-api/.env.template /opt/face-api/.env"
-echo "   sudo nano /opt/face-api/.env"
+echo "   sudo cp /home/face-api/.env.template /home/face-api/.env"
+echo "   sudo nano /home/face-api/.env"
 echo "   (Update MongoDB URI and secret key)"
 echo
 echo "2. Start the API service:"
