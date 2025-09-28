@@ -31,13 +31,13 @@ sudo apt-get install -y git curl nginx htop
 
 # Create application user
 echo "👤 Creating application user..."
-sudo useradd -r -s /bin/bash -d /opt/face-api face-api || true
-sudo mkdir -p /opt/face-api
-sudo chown face-api:face-api /opt/face-api
+sudo useradd -r -s /bin/bash -d /home/face-api face-api || true
+sudo mkdir -p /home/face-api
+sudo chown face-api:face-api /home/face-api
 
 # Clone repository as face-api user
 echo "📥 Cloning repository..."
-cd /opt/face-api
+cd /home/face-api
 if [ ! -d ".git" ]; then
     sudo -u face-api git clone https://github.com/hishamac/face-gallery-api.git .
 else
@@ -46,7 +46,7 @@ fi
 
 # Setup Python environment
 echo "🔧 Setting up Python virtual environment..."
-cd /opt/face-api
+cd /home/face-api
 sudo -u face-api python3 -m venv venv
 sudo -u face-api venv/bin/pip install --upgrade pip setuptools wheel
 
@@ -62,11 +62,11 @@ echo "📁 Creating application directories..."
 sudo -u face-api mkdir -p logs
 
 # Set proper permissions
-sudo chmod 755 /opt/face-api
+sudo chmod 755 /home/face-api
 
 # Create environment file template
 echo "⚙️ Creating environment configuration..."
-sudo tee /opt/face-api/.env.template > /dev/null << EOF
+sudo tee /home/face-api/.env.template > /dev/null << EOF
 # Flask Configuration
 FLASK_ENV=development
 FLASK_DEBUG=True
@@ -92,7 +92,7 @@ CORS_ORIGINS=https://face-gallery-client.vercel.app
 PORT=5000
 EOF
 
-sudo chown face-api:face-api /opt/face-api/.env.template
+sudo chown face-api:face-api /home/face-api/.env.template
 
 # Create systemd service
 echo "🔄 Creating systemd service..."
@@ -105,10 +105,10 @@ After=network.target
 Type=exec
 User=face-api
 Group=face-api
-WorkingDirectory=/opt/face-api
-Environment=PATH=/opt/face-api/venv/bin
-EnvironmentFile=/opt/face-api/.env
-ExecStart=/opt/face-api/venv/bin/gunicorn --workers 1 --bind 127.0.0.1:5000 --timeout 300 --max-requests 1000 --access-logfile /opt/face-api/logs/access.log --error-logfile /opt/face-api/logs/error.log app:app
+WorkingDirectory=/home/face-api
+Environment=PATH=/home/face-api/venv/bin
+EnvironmentFile=/home/face-api/.env
+ExecStart=/home/face-api/venv/bin/gunicorn --workers 1 --bind 127.0.0.1:5000 --timeout 300 --max-requests 1000 --access-logfile /home/face-api/logs/access.log --error-logfile /home/face-api/logs/error.log app:app
 ExecReload=/bin/kill -s HUP \$MAINPID
 Restart=always
 RestartSec=10
@@ -196,7 +196,7 @@ sudo nginx -t
 
 # Create log rotation
 sudo tee /etc/logrotate.d/face-api > /dev/null << EOF
-/opt/face-api/logs/*.log {
+/home/face-api/logs/*.log {
     daily
     missingok
     rotate 14
@@ -211,21 +211,21 @@ sudo tee /etc/logrotate.d/face-api > /dev/null << EOF
 EOF
 
 # Create update script
-sudo tee /opt/face-api/update.sh > /dev/null << EOF
+sudo tee /home/face-api/update.sh > /dev/null << EOF
 #!/bin/bash
 echo "🔄 Updating Face Recognition API..."
-cd /opt/face-api
+cd /home/face-api
 sudo -u face-api git pull origin main
-cd /opt/face-api
+cd /home/face-api
 sudo -u face-api venv/bin/pip install -r requirements.txt
 sudo systemctl restart face-api
 echo "✅ Update completed!"
 EOF
 
-sudo chmod +x /opt/face-api/update.sh
+sudo chmod +x /home/face-api/update.sh
 
 # Create monitoring script
-sudo tee /opt/face-api/monitor.sh > /dev/null << EOF
+sudo tee /home/face-api/monitor.sh > /dev/null << EOF
 #!/bin/bash
 echo "📊 Face API System Status"
 echo "========================"
@@ -243,39 +243,39 @@ echo "💽 Disk Usage:"
 df -h /
 echo
 echo "📈 API Logs (last 10 lines):"
-tail -n 10 /opt/face-api/logs/error.log 2>/dev/null || echo "No error logs yet"
+tail -n 10 /home/face-api/logs/error.log 2>/dev/null || echo "No error logs yet"
 EOF
 
-sudo chmod +x /opt/face-api/monitor.sh
+sudo chmod +x /home/face-api/monitor.sh
 
 # Create validation script
-sudo tee /opt/face-api/validate-setup.sh > /dev/null << EOF
+sudo tee /home/face-api/validate-setup.sh > /dev/null << EOF
 #!/bin/bash
 echo "🔍 Validating Face API Setup..."
 echo "=============================="
 
 # Check Python environment
 echo "1. Python Environment:"
-if [ -f "/opt/face-api/venv/bin/python" ]; then
+if [ -f "/home/face-api/venv/bin/python" ]; then
     echo "   ✅ Virtual environment exists"
-    /opt/face-api/venv/bin/python --version
+    /home/face-api/venv/bin/python --version
 else
     echo "   ❌ Virtual environment missing"
 fi
 
 # Check dependencies
 echo "2. Dependencies:"
-/opt/face-api/venv/bin/pip list | grep -E "(flask|face-recognition|dlib|gunicorn)" || echo "   ❌ Some dependencies missing"
+/home/face-api/venv/bin/pip list | grep -E "(flask|face-recognition|dlib|gunicorn)" || echo "   ❌ Some dependencies missing"
 
 # Check files
 echo "3. Application Files:"
-[ -f "/opt/face-api/app.py" ] && echo "   ✅ app.py found" || echo "   ❌ app.py missing"
-[ -f "/opt/face-api/requirements.txt" ] && echo "   ✅ requirements.txt found" || echo "   ❌ requirements.txt missing"
-[ -f "/opt/face-api/.env.template" ] && echo "   ✅ .env.template found" || echo "   ❌ .env.template missing"
+[ -f "/home/face-api/app.py" ] && echo "   ✅ app.py found" || echo "   ❌ app.py missing"
+[ -f "/home/face-api/requirements.txt" ] && echo "   ✅ requirements.txt found" || echo "   ❌ requirements.txt missing"
+[ -f "/home/face-api/.env.template" ] && echo "   ✅ .env.template found" || echo "   ❌ .env.template missing"
 
 # Check directories
 echo "4. Directories:"
-[ -d "/opt/face-api/logs" ] && echo "   ✅ logs directory" || echo "   ❌ logs directory missing"
+[ -d "/home/face-api/logs" ] && echo "   ✅ logs directory" || echo "   ❌ logs directory missing"
 
 # Check services
 echo "5. Services:"
@@ -295,10 +295,10 @@ echo "Setup validation completed!"
 echo "Next: Create .env file and start face-api service"
 EOF
 
-sudo chmod +x /opt/face-api/validate-setup.sh
+sudo chmod +x /home/face-api/validate-setup.sh
 
 # Create Let's Encrypt setup script (for when domain is available)
-sudo tee /opt/face-api/setup-letsencrypt.sh > /dev/null << EOF
+sudo tee /home/face-api/setup-letsencrypt.sh > /dev/null << EOF
 #!/bin/bash
 echo "🔐 Setting up Let's Encrypt SSL Certificate..."
 echo "============================================="
@@ -306,7 +306,7 @@ echo "============================================="
 # Check if domain is provided
 if [ -z "\$1" ]; then
     echo "❌ Please provide your domain name"
-    echo "Usage: sudo /opt/face-api/setup-letsencrypt.sh your-domain.com"
+    echo "Usage: sudo /home/face-api/setup-letsencrypt.sh your-domain.com"
     exit 1
 fi
 
@@ -399,10 +399,10 @@ echo "   2. Update your client CORS_ORIGINS to: https://\$DOMAIN"
 echo "   3. Certificate will auto-renew every 12 hours"
 EOF
 
-sudo chmod +x /opt/face-api/setup-letsencrypt.sh
+sudo chmod +x /home/face-api/setup-letsencrypt.sh
 
 # Create manual certificate installation script
-sudo tee /opt/face-api/install-existing-cert.sh > /dev/null << EOF
+sudo tee /home/face-api/install-existing-cert.sh > /dev/null << EOF
 #!/bin/bash
 echo "🔧 SSL Certificate Installer"
 echo "============================"
@@ -410,7 +410,7 @@ echo "============================"
 # Check if domain is provided
 if [ -z "\$1" ]; then
     echo "❌ Please provide your domain name"
-    echo "Usage: sudo /opt/face-api/install-existing-cert.sh your-domain.com"
+    echo "Usage: sudo /home/face-api/install-existing-cert.sh your-domain.com"
     echo
     echo "This script will:"
     echo "  1. Check if Let's Encrypt certificate exists for your domain"
@@ -428,7 +428,7 @@ echo
 # Check if certificate exists
 if [ ! -f "/etc/letsencrypt/live/\$DOMAIN/fullchain.pem" ]; then
     echo "❌ Certificate for \$DOMAIN not found"
-    echo "Run: sudo /opt/face-api/setup-letsencrypt.sh \$DOMAIN"
+    echo "Run: sudo /home/face-api/setup-letsencrypt.sh \$DOMAIN"
     exit 1
 fi
 
@@ -515,10 +515,10 @@ echo "   2. Update your client CORS_ORIGINS to: https://\$DOMAIN"
 echo "   3. Certificate will auto-renew (cron job already set up)"
 EOF
 
-sudo chmod +x /opt/face-api/install-existing-cert.sh
+sudo chmod +x /home/face-api/install-existing-cert.sh
 
 # Create IP-to-HTTPS access script
-sudo tee /opt/face-api/get-https-access.sh > /dev/null << EOF
+sudo tee /home/face-api/get-https-access.sh > /dev/null << EOF
 #!/bin/bash
 echo "🌐 HTTPS Access Information"
 echo "=========================="
@@ -538,13 +538,13 @@ echo
 echo "🔐 For trusted certificates:"
 echo "   1. Get a domain name"
 echo "   2. Point domain to this IP: \$EXTERNAL_IP"
-echo "   3. Run: sudo /opt/face-api/setup-letsencrypt.sh your-domain.com"
+echo "   3. Run: sudo /home/face-api/setup-letsencrypt.sh your-domain.com"
 echo
 echo "🧪 Test HTTPS connection:"
 echo "   curl -k https://\$EXTERNAL_IP/"
 EOF
 
-sudo chmod +x /opt/face-api/get-https-access.sh
+sudo chmod +x /home/face-api/get-https-access.sh
 
 # Enable and start services
 echo "🏁 Starting services...."
@@ -572,14 +572,14 @@ if [ -d "$USER_HOME" ] && [ "$USER_NAME" != "root" ]; then
 alias face-status='sudo systemctl status face-api'
 alias face-logs='sudo journalctl -u face-api -f'
 alias face-restart='sudo systemctl restart face-api'
-alias face-update='sudo /opt/face-api/update.sh'
-alias face-monitor='sudo /opt/face-api/monitor.sh'
-alias face-validate='sudo /opt/face-api/validate-setup.sh'
+alias face-update='sudo /home/face-api/update.sh'
+alias face-monitor='sudo /home/face-api/monitor.sh'
+alias face-validate='sudo /home/face-api/validate-setup.sh'
 alias nginx-test='sudo nginx -t'
 alias nginx-reload='sudo systemctl reload nginx'
-alias https-info='sudo /opt/face-api/get-https-access.sh'
-alias setup-ssl='sudo /opt/face-api/setup-letsencrypt.sh'
-alias install-cert='sudo /opt/face-api/install-existing-cert.sh'
+alias https-info='sudo /home/face-api/get-https-access.sh'
+alias setup-ssl='sudo /home/face-api/setup-letsencrypt.sh'
+alias install-cert='sudo /home/face-api/install-existing-cert.sh'
 EOF
     sudo chown $USER_NAME:$USER_NAME "$USER_HOME/.bash_aliases"
     echo "✅ Aliases created in $USER_HOME/.bash_aliases"
@@ -634,8 +634,8 @@ echo "   setup-ssl        - Setup Let's Encrypt (requires domain)"
 echo "   install-cert     - Install existing Let's Encrypt certificate"
 echo
 echo "📁 Important paths:"
-echo "   API Code: /opt/face-api/"
-echo "   Logs: /opt/face-api/logs/"
+echo "   API Code: /home/face-api/"
+echo "   Logs: /home/face-api/logs/"
 echo
 echo "🔧 Next steps:"
 echo "   1. Configure your .env file with MongoDB connection"
