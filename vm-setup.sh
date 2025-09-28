@@ -538,7 +538,7 @@ EOF
 sudo chmod +x /opt/face-api/get-https-access.sh
 
 # Enable and start services
-echo "🏁 Starting services..."
+echo "🏁 Starting services...."
 sudo systemctl daemon-reload
 sudo systemctl enable nginx
 sudo systemctl restart nginx
