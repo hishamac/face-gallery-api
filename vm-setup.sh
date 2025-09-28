@@ -404,17 +404,26 @@ sudo chmod +x /opt/face-api/setup-letsencrypt.sh
 # Create manual certificate installation script
 sudo tee /opt/face-api/install-existing-cert.sh > /dev/null << EOF
 #!/bin/bash
-echo "🔧 Installing existing Let's Encrypt certificate..."
-echo "================================================"
+echo "🔧 SSL Certificate Installer"
+echo "============================"
 
 # Check if domain is provided
 if [ -z "\$1" ]; then
     echo "❌ Please provide your domain name"
     echo "Usage: sudo /opt/face-api/install-existing-cert.sh your-domain.com"
+    echo
+    echo "This script will:"
+    echo "  1. Check if Let's Encrypt certificate exists for your domain"
+    echo "  2. Update Nginx configuration with your domain"
+    echo "  3. Install the certificate and reload Nginx"
+    echo "  4. Test HTTPS connection"
     exit 1
 fi
 
 DOMAIN=\$1
+
+echo "🔍 Installing SSL certificate for: \$DOMAIN"
+echo
 
 # Check if certificate exists
 if [ ! -f "/etc/letsencrypt/live/\$DOMAIN/fullchain.pem" ]; then
